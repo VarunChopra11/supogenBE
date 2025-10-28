@@ -5,6 +5,5 @@ requests
 motor
 pydantic
 pydantic[email]
-jwt
 PyJWT
 python-jose
