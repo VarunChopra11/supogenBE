@@ -6,4 +6,5 @@ motor
 pydantic
 pydantic[email]
 PyJWT
+cryptography
 python-jose
