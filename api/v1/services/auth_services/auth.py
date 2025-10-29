@@ -116,11 +116,12 @@ class AuthService:
                 detail="Failed to save user information"
             ) from e
 
+        # Use consistent keys expected by UserResponse and clients
         session_payload = {
             "user_id": user_id,
-            "full_name": full_name,
             "email": email,
-            "image_url": image_url,
+            "name": full_name,
+            "picture": image_url,
         }
 
         jwt_token = create_jwt_token(
@@ -180,9 +181,10 @@ class AuthService:
         if not user:
             raise credentials_exception
 
+        # Return a proper UserResponse with correct field names
         return UserResponse(
             user_id=user_id,
-            full_name=user.get("name"),
             email=user.get("email"),
-            image_url=user.get("picture")
+            name=user.get("name"),
+            picture=user.get("picture"),
         )
