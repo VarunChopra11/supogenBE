@@ -36,7 +36,6 @@ async def handshake(
             status_code=status.HTTP_200_OK,
             content={
                 "message": "Handshake successful",
-                "user": result.get("user"),
             },
         )
         resp.set_cookie(
@@ -68,7 +67,13 @@ async def get_user(request: Request, response: Response):
         user = await auth_service.get_current_user(request)
         csrf_token = auth_service.generate_csrf_token()
 
-        user_response = UserResponse.model_validate(user)
+        user_response = UserResponse(
+            user_id=user.user_id,
+            email=user.email,
+            name=user.name,
+            picture=user.picture,
+        )
+
         resp = JSONResponse(
             content={
             "user": user_response.model_dump(),

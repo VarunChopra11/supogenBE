@@ -6,12 +6,11 @@ from typing import Optional, Dict, Any
 import jwt
 from jwt import PyJWKClient
 from fastapi import HTTPException, status, Request
-from jose import JWTError, ExpiredSignatureError
 
 from api.v1.utils.jwt import create_jwt_token
 from api.v1.config import auth_config
 from api.v1.db.session import DatabaseSession
-from api.v1.schemas.users import UserCreate, UserResponse
+from api.v1.schemas.users import UserModel
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,8 @@ class AuthService:
         if not authorization or not authorization.lower().startswith("bearer "):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing or invalid Authorization header"
+                detail="Missing or invalid Authorization header",
+                headers={"WWW-Authenticate": "Bearer"},
             )
         return authorization.split(" ", 1)[1].strip()
 
@@ -57,10 +57,25 @@ class AuthService:
                 },
             )
             return claims
-        except Exception as e:
+        except jwt.ExpiredSignatureError as e:
+            logger.debug("Clerk token expired", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token: {str(e)}"
+                detail="Clerk token has expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from e
+        except jwt.InvalidTokenError as e:
+            logger.debug("Invalid Clerk token", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Clerk token",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from e
+        except Exception as e:
+            logger.error("Error verifying Clerk token: %s", str(e), exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to verify Clerk token",
             ) from e
 
     async def handshake_service(self, authorization: str) -> Dict[str, Any]:
@@ -70,42 +85,29 @@ class AuthService:
         """
         clerk_jwt = self._extract_bearer_token(authorization)
         claims = await self.verify_clerk_jwt(clerk_jwt)
-
+        
         user_id = claims.get("user_id") or claims.get("sub")
-        full_name = claims.get("full_name")
-        email = claims.get("email")
-        image_url = claims.get("image_url")
-
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing subject in token"
             )
 
-        now = datetime.now(timezone.utc)
-        try:
-            user = UserCreate(
-                email=email,
-                user_id=user_id,
-                name=full_name,
-                picture=image_url,
-                created_at=now,
-                updated_at=now
-            )
-        except Exception as e:
-            logger.error(f"User validation error: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Invalid user data format"
-            ) from e
+        user_data = {
+            "user_id": user_id,
+            "email": claims.get("email"),
+            "name": claims.get("full_name"),
+            "picture": claims.get("image_url"),
+            "updated_at": datetime.now(timezone.utc)
+        }
 
         db = DatabaseSession.get_db()
         try:
             await db["users"].update_one(
-                {"email": user.email},
+                {"user_id": user_id},
                 {
-                    "$set": user.model_dump(exclude={"created_at"}, by_alias=True),
-                    "$setOnInsert": {"created_at": user.created_at}
+                    "$set": user_data,
+                    "$setOnInsert": {"created_at": user_data["updated_at"], "servers": []}
                 },
                 upsert=True
             )
@@ -116,23 +118,20 @@ class AuthService:
                 detail="Failed to save user information"
             ) from e
 
-        # Use consistent keys expected by UserResponse and clients
-        session_payload = {
-            "user_id": user_id,
-            "email": email,
-            "name": full_name,
-            "picture": image_url,
+        jwt_payload = {
+            "user_id": user_data["user_id"],
+            "email": user_data.get("email"),
+            "name": user_data.get("name"),
+            "picture": user_data.get("picture"),
         }
 
         jwt_token = create_jwt_token(
-            session_payload,
+            jwt_payload,
             expires_delta=timedelta(minutes=self.JWT_TOKEN_EXPIRE_MINUTES)
         )
 
-        return {
-            "user": session_payload,
-            "token": jwt_token,
-        }
+        return {"user": user_data, "token": jwt_token}
+        
 
     @staticmethod
     async def get_token_from_cookie(request: Request) -> str:
@@ -146,7 +145,7 @@ class AuthService:
         return token
 
     async def get_current_user(self, request: Request) -> Dict[str, Any]:
-        """Get current user from JWT token in cookie."""
+        """Get current user document from DB using JWT token in cookie."""
         db = DatabaseSession.get_db()
         if db is None:
             raise HTTPException(
@@ -167,24 +166,23 @@ class AuthService:
                 auth_config.JWT_SECRET_KEY,
                 algorithms=["HS256"]
             )
-            user_id: str = payload.get("user_id")
-            if user_id is None:
-                raise credentials_exception
-        except (ExpiredSignatureError, JWTError):
+        except jwt.ExpiredSignatureError:
+            logger.debug("Backend JWT expired", exc_info=True)
+            raise credentials_exception
+        except jwt.InvalidTokenError:
+            logger.debug("Backend JWT invalid", exc_info=True)
+            raise credentials_exception
+        user_id: str = payload.get("user_id")
+        if not user_id:
+            logger.debug("Backend JWT missing user_id claim")
             raise credentials_exception
 
         user = await db["users"].find_one(
             {"user_id": user_id},
-            {"_id": 0, "email": 1, "name": 1, "picture": 1}
+            {"_id": 0}
         )
 
         if not user:
             raise credentials_exception
 
-        # Return a proper UserResponse with correct field names
-        return UserResponse(
-            user_id=user_id,
-            email=user.get("email"),
-            name=user.get("name"),
-            picture=user.get("picture"),
-        )
+        return UserModel.model_validate(user)
