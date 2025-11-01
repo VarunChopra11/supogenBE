@@ -68,10 +68,10 @@ async def get_user(request: Request, response: Response):
         csrf_token = auth_service.generate_csrf_token()
 
         user_response = UserResponse(
-            user_id=user.user_id,
-            email=user.email,
-            name=user.name,
-            picture=user.picture,
+            user_id=user["user_id"],
+            email=user["email"],
+            name=user["name"],
+            picture=user["picture"],
         )
 
         resp = JSONResponse(

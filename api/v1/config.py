@@ -8,6 +8,11 @@ class AuthConfig:
     @property
     def JWT_SECRET_KEY(self):
         return os.getenv("JWT_SECRET_KEY")
+
+    @property
+    def FERNET_SECRET_KEY(self):
+        """Base64 urlsafe 32-byte key for cryptography.Fernet."""
+        return os.getenv("FERNET_SECRET_KEY")
     
     @property
     def CLERK_JWKS_URL(self):

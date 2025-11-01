@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 from api.v1.routers.auth_routers import auth
+from api.v1.routers.auth_routers import discord
 from fastapi.middleware.cors import CORSMiddleware
 from api.v1.db.init_db import init_db, close_db
 from contextlib import asynccontextmanager
-
+from api.v1.services.discord_services.discord_bot import run_discord_bot_async
+import asyncio
+import uvicorn
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, tags=["auth"])
+app.include_router(discord.router)
 
 @app.get("/wakeup")
 async def wakeup():
@@ -37,7 +41,23 @@ async def wakeup():
 async def wakeup_head():
     return
 
+async def start_fastapi():
+    """Start FastAPI server on the current event loop."""
+    config = uvicorn.Config("main:app", host="0.0.0.0", port=8000, reload=False, loop="asyncio")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def main():
+    """Start both FastAPI and the Discord bot on the same event loop."""
+    await asyncio.gather(
+        start_fastapi(),
+        run_discord_bot_async(),
+    )
+
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")

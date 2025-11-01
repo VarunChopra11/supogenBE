@@ -14,6 +14,9 @@ class DatabaseSession:
 
     @classmethod
     async def connect(cls, uri: str, db_name: str):
+        # Idempotent connect: if already connected, do nothing
+        if cls.client is not None and cls.db is not None:
+            return
         cls.client = AsyncIOMotorClient(
             uri,
             maxPoolSize=100,

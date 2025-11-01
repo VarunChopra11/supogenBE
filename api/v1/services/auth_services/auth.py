@@ -93,21 +93,21 @@ class AuthService:
                 detail="Missing subject in token"
             )
 
-        user_data = {
-            "user_id": user_id,
-            "email": claims.get("email"),
-            "name": claims.get("full_name"),
-            "picture": claims.get("image_url"),
-            "updated_at": datetime.now(timezone.utc)
-        }
+        user = UserModel(
+            user_id=user_id,
+            email=claims.get("email"),
+            name=claims.get("full_name"),
+            picture=claims.get("image_url"),
+            updated_at=datetime.now(timezone.utc),
+        )
 
         db = DatabaseSession.get_db()
         try:
             await db["users"].update_one(
                 {"user_id": user_id},
                 {
-                    "$set": user_data,
-                    "$setOnInsert": {"created_at": user_data["updated_at"], "servers": []}
+                    "$set": user.model_dump(exclude={"created_at"}),
+                    "$setOnInsert": {"created_at": user.created_at}
                 },
                 upsert=True
             )
@@ -118,19 +118,14 @@ class AuthService:
                 detail="Failed to save user information"
             ) from e
 
-        jwt_payload = {
-            "user_id": user_data["user_id"],
-            "email": user_data.get("email"),
-            "name": user_data.get("name"),
-            "picture": user_data.get("picture"),
-        }
+        jwt_payload = user.model_dump(exclude={"created_at", "updated_at"})
 
         jwt_token = create_jwt_token(
             jwt_payload,
             expires_delta=timedelta(minutes=self.JWT_TOKEN_EXPIRE_MINUTES)
         )
 
-        return {"user": user_data, "token": jwt_token}
+        return {"user": user, "token": jwt_token}
         
 
     @staticmethod
@@ -185,4 +180,4 @@ class AuthService:
         if not user:
             raise credentials_exception
 
-        return UserModel.model_validate(user)
+        return user
