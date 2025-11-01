@@ -4,7 +4,7 @@ from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 import os
-from api.v1.services.discord_services.discord_auth import (
+from api.v1.services.discord_services.discord import (
     authenticate_server, 
     ServerAlreadyRegisteredError,
     TokenAlreadyUsedError,
