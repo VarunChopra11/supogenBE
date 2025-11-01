@@ -20,15 +20,18 @@ class DocumentService:
                 return
 
             db = DatabaseSession.get_db()
-            if not db:
+            if db is None:
                 logger.error("Database connection not available")
                 return
+
+            # Ensure URL is stored as plain string (request may pass Pydantic HttpUrl)
+            document_str = str(document)
 
             document = DocumentModel(
                 document_id=str(uuid.uuid4()),
                 user_id=user_id,
                 server_id=server_id,
-                document_url=document,
+                document_url=document_str,
                 created_at=datetime.now(timezone.utc)
             ).model_dump()
 
@@ -47,7 +50,7 @@ class DocumentService:
                 return []
 
             db = DatabaseSession.get_db()
-            if not db:
+            if db is None:
                 logger.error("Database connection not available")
                 return []
 
@@ -69,11 +72,13 @@ class DocumentService:
                 return None
 
             db = DatabaseSession.get_db()
-            if not db:
+            if db is None:
                 logger.error("Database connection not available")
                 return None
 
-            doc = await db["documents"].find_one({"document_url": document_url})
+            # Normalize to string in case a Pydantic HttpUrl is passed from request model
+            document_url_str = str(document_url)
+            doc = await db["documents"].find_one({"document_url": document_url_str})
             if doc:
                 return DocumentModel(**doc)
             return None

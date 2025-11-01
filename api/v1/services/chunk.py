@@ -112,7 +112,7 @@ class ChunkService:
             logger.error(f"Error chunking text: {str(e)}")
             raise ValueError(f"Failed to chunk text: {str(e)}")
 
-    async def generate_and_store_chunks_from_url(self, url: str, user_id: uuid.UUID, server_id: uuid.UUID) -> List[Dict[str, Any]]:
+    async def generate_and_store_chunks_from_url(self, url: str, user_id: str, server_id: str) -> List[Dict[str, Any]]:
         """Generate chunks from markdown URL and store in MongoDB with vector embeddings"""
         try:
 
@@ -123,11 +123,11 @@ class ChunkService:
             for sec in sections:
                 chunks = self.chunk_text(sec["text"])
                 for idx, ch in enumerate(chunks):
-                    # Generate embedding for the chunk 
+                    # Generate embedding for the chunk (async call)
                     embedding = await generate_text_embedding(ch)
                     
                     chunk_doc = {
-                        "chunk_id": uuid.uuid4(),
+                        "chunk_id": str(uuid.uuid4()),
                         "doc_url": str(url),
                         "heading": sec["heading"],
                         "anchor": sec["anchor"],

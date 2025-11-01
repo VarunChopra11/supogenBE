@@ -45,7 +45,7 @@ async def embed_documents(
 
         chunks = await chunk_service.generate_and_store_chunks_from_url(
             url=request.document_url,
-            user_id=user.user_id,
+            user_id=user["user_id"],
             server_id=request.server_id
         )
         
@@ -58,7 +58,7 @@ async def embed_documents(
         # Insert document record
         await document_service.insert_document(
             document=request.document_url,
-            user_id=user.user_id,
+            user_id=user["user_id"],
             server_id=request.server_id
         )
 

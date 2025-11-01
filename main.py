@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from api.v1.routers.auth_routers import auth
 from api.v1.routers.auth_routers import discord
 from api.v1.routers.documents import router as documents_router
+from api.v1.routers.chat import router as chat_router
 from fastapi.middleware.cors import CORSMiddleware
 from api.v1.db.init_db import init_db, close_db
 from contextlib import asynccontextmanager
@@ -33,7 +34,9 @@ app.add_middleware(
 
 app.include_router(auth.router, tags=["auth"])
 app.include_router(discord.router)
+app.include_router(chat_router, tags=["chat"])
 app.include_router(documents_router, prefix="/documents", tags=["documents"])
+
 
 @app.get("/wakeup")
 async def wakeup():
