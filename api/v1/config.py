@@ -42,5 +42,14 @@ class DBConfig:
     def MONGO_DB_NAME(self):
         return os.getenv("MONGO_DB_NAME")
     
+class AIConfig:
+    def __init__(self):
+        load_dotenv(override=True)
+
+    @property
+    def OPENAI_API_KEY(self):
+        return os.getenv("OPENAI_API_KEY")
+    
 auth_config = AuthConfig()
 db_config = DBConfig()
+ai_config = AIConfig()

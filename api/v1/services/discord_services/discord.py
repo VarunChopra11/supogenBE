@@ -200,7 +200,8 @@ async def get_user_servers(user_id: str) -> list:
             return []
             
         servers = await db["discord_servers"].find(
-            {"user_id": str(user_id)}
+            {"user_id": str(user_id)},
+            {"_id": 0, "server_id": 1, "server_name": 1, "member_count": 1}
         ).to_list(length=None)
         
         return servers
