@@ -64,7 +64,7 @@ class DocumentService:
             logger.error(f"Error retrieving documents for server {server_id}: {str(e)}")
             raise
     
-    async def get_document_by_url(self, document_url: str) -> Optional[DocumentModel]:
+    async def get_document_by_url_and_server(self, document_url: str, server_id: str) -> Optional[DocumentModel]:
         """Retrieve a document by its URL."""
         try:
             if not document_url:
@@ -78,7 +78,7 @@ class DocumentService:
 
             # Normalize to string in case a Pydantic HttpUrl is passed from request model
             document_url_str = str(document_url)
-            doc = await db["documents"].find_one({"document_url": document_url_str})
+            doc = await db["documents"].find_one({"document_url": document_url_str, "server_id": server_id})
             if doc:
                 return DocumentModel(**doc)
             return None

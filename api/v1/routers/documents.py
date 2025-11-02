@@ -36,7 +36,7 @@ async def embed_documents(
             )
 
         # Check url not in documents already
-        document = await document_service.get_document_by_url(request.document_url)
+        document = await document_service.get_document_by_url_and_server(request.document_url, request.server_id)
         if document:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
