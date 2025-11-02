@@ -14,7 +14,7 @@ from api.v1.services.discord_services.discord import (
     InvalidTokenError,
     DatabaseError,
     AuthenticationError,
-    send_message_stream,
+    send_message,
 )
 
 from api.v1.db.session import DatabaseSession
@@ -184,29 +184,19 @@ async def on_message(message: discord.Message):
             return
         
         async with message.channel.typing():
-            response_stream = send_message_stream(
-                [{"type": "text", "text": content}], user_id=user_id, server_id=server_id
+            response = await asyncio.wait_for(
+                send_message([{"type": "text", "text": content}], user_id=user_id),
+                timeout=30
             )
 
-            streamed_text = ""
-            thread = None
-            while True:
-                try:
-                    # Per-chunk timeout similar to previous behavior
-                    chunk = await asyncio.wait_for(anext(response_stream), timeout=30)
-                except StopAsyncIteration:
-                    break
-                streamed_text += chunk or ""
-                if isinstance(message.channel, discord.Thread):
-                    await message.reply(chunk)
-                else:
-                    if thread is None:
-                        thread = await message.create_thread(name="Chat Thread")
-                    await thread.send(chunk)
+        if not response or not isinstance(response, str):
+            response = "⚠️ Sorry, I couldn't process that."
 
-        # fallback if empty
-        if not streamed_text:
-            await message.reply("⚠️ Sorry, I couldn't process that.")
+        if isinstance(message.channel, discord.Thread):
+            await message.reply(response)
+        else:
+            thread = await message.create_thread(name="Chat Thread")
+            await thread.send(response)
 
     except asyncio.TimeoutError:
         await message.reply("⏱️ The model took too long to respond.")
