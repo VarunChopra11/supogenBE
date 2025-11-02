@@ -11,3 +11,7 @@ async def init_db():
     # Ensure indexes only once during startup
     await setup_ttl_indexes()
     await setup_vector_index()   # add this line
+
+async def close_db():
+    await DatabaseSession.close()
+    
