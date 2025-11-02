@@ -16,30 +16,48 @@ async def setup_ttl_indexes():
 async def setup_vector_index():
     """Ensure vector search index exists for document chunks."""
     db = DatabaseSession.get_db()
-    collection = db["chunks"]  # replace with your actual collection name
+    collection = db["embedded_documents"]  # replace with your actual collection name
 
+    index_name = "chunks_vector_index"
+
+    # Definition must be wrapped under `definition` for createSearchIndexes
     index_def = {
-        "name": "chunks_vector_index",
-        "mappings": {
-            "dynamic": True,
-            "fields": {
-                "embedding": {
-                    "type": "vectorSearch",
-                    "dimensions": 1536,
-                    "similarity": "cosine"
+        "name": index_name,
+        "definition": {
+            "mappings": {
+                "dynamic": True,
+                "fields": {
+                    "embedding": {
+                        "type": "knnVector",
+                        "dimensions": 1536,
+                        "similarity": "cosine",
+                    },
+                    "server_id": {"type": "string"},
+                    "user_id": {"type": "string"},
+                    "created_at": {"type": "date"},
                 },
-                "server_id": {"type": "string"},
-                "user_id": {"type": "string"},
-                "created_at": {"type": "date"}
             }
         }
     }
 
-    # Motor (async driver) currently doesn’t have create_search_index helper,
-    # so we call the raw command directly:
+    # Best-effort: skip creation if index already exists (supported on MongoDB 7+/Atlas)
+    try:
+        existing = await db.command({
+            "listSearchIndexes": collection.name,
+            "name": index_name,
+        })
+        first_batch = existing.get("cursor", {}).get("firstBatch", [])
+        if any(ix.get("name") == index_name for ix in first_batch):
+            print("✅ Vector search index already exists on chunks.embedding")
+            return
+    except Exception:
+        # If command unsupported, proceed to attempt creation
+        pass
+
+    # Create or update the search index definition
     await db.command({
         "createSearchIndexes": collection.name,
-        "indexes": [index_def]
+        "indexes": [index_def],
     })
 
     print("✅ Vector search index ensured on chunks.embedding (1536-d cosine)")
