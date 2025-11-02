@@ -88,23 +88,9 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # Prevent duplicate responses (reply + thread)
-    if message.reference and isinstance(message.channel, discord.Thread):
-        return
-
-    # Only respond if bot is mentioned, or message is a reply to bot, or in a thread owned by bot
-    if (
-        bot.user not in message.mentions
-        and not (
-            message.reference
-            and message.reference.resolved
-            and message.reference.resolved.author.id == bot.user.id
-        )
-        and not (
-            isinstance(message.channel, discord.Thread)
-            and message.channel.owner_id == bot.user.id
-        )
-    ):
+    if (bot.user not in message.mentions and 
+        not (message.reference and message.reference.resolved and message.reference.resolved.author.id == bot.user.id) and
+        not (isinstance(message.channel, discord.Thread) and message.channel.owner_id == bot.user.id)):
         return
 
     content = message.content.replace(f"<@{bot.user.id}>", "").strip()
@@ -148,6 +134,8 @@ async def on_message(message: discord.Message):
     except Exception as e:
         logging.error(f"Error handling message: {e}", exc_info=True)
         await message.reply("❌ Something went wrong while processing your request.")
+
+    await bot.process_commands(message)
 
 
 # --- /Authenticate Command for Bot-Server Mapping ---
