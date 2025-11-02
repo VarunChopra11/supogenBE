@@ -79,6 +79,63 @@ async def on_ready():
         logging.error(f"❌ Failed to sync commands: {e}")
 
 
+@bot.event
+async def on_message(message: discord.Message):
+    msg_json = json.dumps(message_to_dict(message), indent=4, ensure_ascii=False)
+    print("------------------------------------------------")
+    print(msg_json)
+    print("------------------------------------------------")
+    if message.author.bot:
+        return
+
+    if (bot.user not in message.mentions and 
+        not (message.reference and message.reference.resolved and message.reference.resolved.author.id == bot.user.id) and
+        not (isinstance(message.channel, discord.Thread) and message.channel.owner_id == bot.user.id)):
+        return
+
+    content = message.content.replace(f"<@{bot.user.id}>", "").strip()
+    if not content:
+        await message.reply("👋 Hi! Mention me with a message to chat.")
+        return
+    
+    try:
+        db = DatabaseSession.get_db()
+
+        server_id = str(message.guild.id) if message.guild else None
+
+        # Search server for user_id
+        server = await db["discord_servers"].find_one({"server_id": server_id}) if server_id else None
+        if not server:
+            await message.reply("❌ This server is not authenticated. Please ask the server admin to authenticate the bot using the `/authenticate` command.")
+            return
+        
+        user_id = server.get("owner_id") if server else None
+        if not user_id:
+            await message.reply("❌ Unable to identify server owner. Please contact support.")
+            return
+        
+        async with message.channel.typing():
+            response = await asyncio.wait_for(
+                send_message([{"type": "text", "text": content}], user_id=user_id, server_id=server_id),
+                timeout=30
+            )
+
+        if not response or not isinstance(response, str):
+            response = "⚠️ Sorry, I couldn't process that."
+
+        if isinstance(message.channel, discord.Thread):
+            await message.reply(response)
+        else:
+            thread = await message.create_thread(name="Chat Thread")
+            await thread.send(response)
+
+    except asyncio.TimeoutError:
+        await message.reply("⏱️ The model took too long to respond.")
+    except Exception as e:
+        logging.error(f"Error handling message: {e}", exc_info=True)
+        await message.reply("❌ Something went wrong while processing your request.")
+
+
 # --- /Authenticate Command for Bot-Server Mapping ---
 @bot.tree.command(name="authenticate", description="Authenticate server to bot")
 @app_commands.describe(token="Your JWT token")
@@ -147,65 +204,6 @@ async def authenticate(interaction: discord.Interaction, token: str):
     except Exception as e:
         logging.error(f"Unexpected error during authentication: {e}")
         await interaction.followup.send("❌ An unexpected error occurred. Please try again later.", ephemeral=True)
-
-@bot.event
-async def on_message(message: discord.Message):
-    msg_json = json.dumps(message_to_dict(message), indent=4, ensure_ascii=False)
-    print("------------------------------------------------")
-    print(msg_json)
-    print("------------------------------------------------")
-    if message.author.bot:
-        return
-
-    if (bot.user not in message.mentions and 
-        not (message.reference and message.reference.resolved and message.reference.resolved.author.id == bot.user.id) and
-        not (isinstance(message.channel, discord.Thread) and message.channel.owner_id == bot.user.id)):
-        return
-
-    content = message.content.replace(f"<@{bot.user.id}>", "").strip()
-    if not content:
-        await message.reply("👋 Hi! Mention me with a message to chat.")
-        return
-    
-    try:
-        db = DatabaseSession.get_db()
-
-        server_id = str(message.guild.id) if message.guild else None
-
-        # Search server for user_id
-        server = await db["discord_servers"].find_one({"server_id": server_id}) if server_id else None
-        if not server:
-            await message.reply("❌ This server is not authenticated. Please ask the server admin to authenticate the bot using the `/authenticate` command.")
-            return
-        
-        user_id = server.get("owner_id") if server else None
-        if not user_id:
-            await message.reply("❌ Unable to identify server owner. Please contact support.")
-            return
-        
-        async with message.channel.typing():
-            response = await asyncio.wait_for(
-                send_message([{"type": "text", "text": content}], user_id=user_id, server_id=server_id),
-                timeout=30
-            )
-
-        if not response or not isinstance(response, str):
-            response = "⚠️ Sorry, I couldn't process that."
-
-        if isinstance(message.channel, discord.Thread):
-            await message.reply(response)
-        else:
-            thread = await message.create_thread(name="Chat Thread")
-            await thread.send(response)
-
-    except asyncio.TimeoutError:
-        await message.reply("⏱️ The model took too long to respond.")
-    except Exception as e:
-        logging.error(f"Error handling message: {e}", exc_info=True)
-        await message.reply("❌ Something went wrong while processing your request.")
-
-
-
 
 
 async def run_discord_bot_async():
