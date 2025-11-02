@@ -185,7 +185,7 @@ async def on_message(message: discord.Message):
         
         async with message.channel.typing():
             response = await asyncio.wait_for(
-                send_message([{"type": "text", "text": content}], user_id=user_id),
+                send_message([{"type": "text", "text": content}], user_id=user_id, server_id=server_id),
                 timeout=30
             )
 
