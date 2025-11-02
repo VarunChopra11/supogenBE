@@ -60,7 +60,7 @@ async def get_openai_chat_completion(prompt: str) -> AsyncGenerator[str, None]:
         raise RuntimeError(f"Unexpected error in chat completion: {e}") from e
 
 
-def insert_embeddings(records: List[Dict[str, Any]]) -> None:
+async def insert_embeddings(records: List[Dict[str, Any]]) -> None:
     """Insert embedding records into MongoDB collection."""
     db = DatabaseSession.get_db()
     if db is None:
@@ -69,7 +69,7 @@ def insert_embeddings(records: List[Dict[str, Any]]) -> None:
         return
     if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
         raise ValueError("Records must be a list of dictionaries")
-    db["embedded_documents"].insert_many(records, ordered=False)
+    await db["embedded_documents"].insert_many(records, ordered=False)
 
 
 async def search_similar_docs(
@@ -80,7 +80,7 @@ async def search_similar_docs(
 ) -> List[Dict[str, Any]]:
     """
     Perform MongoDB Atlas vector search for similar documents using Motor's async cursor.
-    Returns a list of result documents.
+    Returns a list of result documents filtered by user_id and server_id.
     """
     if not query_embedding or not isinstance(query_embedding, list):
         raise ValueError("Query embedding must be a non-empty list of floats")
@@ -88,24 +88,17 @@ async def search_similar_docs(
     pipeline = [
         {
             "$vectorSearch": {
-                "queryVector": query_embedding,
+                "index": "chunks_vector_index",
                 "path": "embedding",
-                "numCandidates": 100,
-                "limit": top_k,
-                "index": "vector_index",
+                "queryVector": query_embedding,
+                "limit": top_k,            # required by Atlas
+                "numCandidates": 100,      # tune as needed
                 "filter": {
                     "user_id": user_id,
-                    "server_id": server_id,
-                },
+                    "server_id": server_id
+                }
             }
-        },
-        {
-            "$project": {
-                "text": 1,
-                "doc_url": 1,
-                "score": {"$meta": "vectorSearchScore"},
-            }
-        },
+        }
     ]
     db = DatabaseSession.get_db()
     if db is None:

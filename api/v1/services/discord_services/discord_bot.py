@@ -4,7 +4,7 @@ from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 import os
-import json
+
 import asyncio
 from api.v1.services.discord_services.discord import (
     authenticate_server, 
@@ -81,10 +81,7 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    msg_json = json.dumps(message_to_dict(message), indent=4, ensure_ascii=False)
-    print("------------------------------------------------")
-    print(msg_json)
-    print("------------------------------------------------")
+    
     if message.author.bot:
         return
 
@@ -109,7 +106,7 @@ async def on_message(message: discord.Message):
             await message.reply("❌ This server is not authenticated. Please ask the server admin to authenticate the bot using the `/authenticate` command.")
             return
         
-        user_id = server.get("owner_id") if server else None
+        user_id = server.get("user_id") if server else None
         if not user_id:
             await message.reply("❌ Unable to identify server owner. Please contact support.")
             return

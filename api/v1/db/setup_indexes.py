@@ -13,51 +13,51 @@ async def setup_ttl_indexes():
     print("✅ TTL index ensured on invalid_tokens.added_at (6 minutes)")
 
 
-async def setup_vector_index():
-    """Ensure vector search index exists for document chunks."""
-    db = DatabaseSession.get_db()
-    collection = db["embedded_documents"]  # replace with your actual collection name
+# async def setup_vector_index():
+#     """Ensure vector search index exists for document chunks."""
+#     db = DatabaseSession.get_db()
+#     collection = db["embedded_documents"]  # replace with your actual collection name
 
-    index_name = "chunks_vector_index"
+#     index_name = "chunks_vector_index"
 
-    # Definition must be wrapped under `definition` for createSearchIndexes
-    index_def = {
-        "name": index_name,
-        "definition": {
-            "mappings": {
-                "dynamic": True,
-                "fields": {
-                    "embedding": {
-                        "type": "knnVector",
-                        "dimensions": 1536,
-                        "similarity": "cosine",
-                    },
-                    "server_id": {"type": "string"},
-                    "user_id": {"type": "string"},
-                    "created_at": {"type": "date"},
-                },
-            }
-        }
-    }
+#     # Definition must be wrapped under `definition` for createSearchIndexes
+#     index_def = {
+#         "name": index_name,
+#         "definition": {
+#             "mappings": {
+#                 "dynamic": True,
+#                 "fields": {
+#                     "embedding": {
+#                         "type": "knnVector",
+#                         "dimensions": 1536,
+#                         "similarity": "cosine",
+#                     },
+#                     "server_id": {"type": "string"},
+#                     "user_id": {"type": "string"},
+#                     "created_at": {"type": "date"},
+#                 },
+#             }
+#         }
+#     }
 
-    # Best-effort: skip creation if index already exists (supported on MongoDB 7+/Atlas)
-    try:
-        existing = await db.command({
-            "listSearchIndexes": collection.name,
-            "name": index_name,
-        })
-        first_batch = existing.get("cursor", {}).get("firstBatch", [])
-        if any(ix.get("name") == index_name for ix in first_batch):
-            print("✅ Vector search index already exists on chunks.embedding")
-            return
-    except Exception:
-        # If command unsupported, proceed to attempt creation
-        pass
+#     # Best-effort: skip creation if index already exists (supported on MongoDB 7+/Atlas)
+#     try:
+#         existing = await db.command({
+#             "listSearchIndexes": collection.name,
+#             "name": index_name,
+#         })
+#         first_batch = existing.get("cursor", {}).get("firstBatch", [])
+#         if any(ix.get("name") == index_name for ix in first_batch):
+#             print("✅ Vector search index already exists on chunks.embedding")
+#             return
+#     except Exception:
+#         # If command unsupported, proceed to attempt creation
+#         pass
 
-    # Create or update the search index definition
-    await db.command({
-        "createSearchIndexes": collection.name,
-        "indexes": [index_def],
-    })
+#     # Create or update the search index definition
+#     await db.command({
+#         "createSearchIndexes": collection.name,
+#         "indexes": [index_def],
+#     })
 
-    print("✅ Vector search index ensured on chunks.embedding (1536-d cosine)")
+#     print("✅ Vector search index ensured on chunks.embedding (1536-d cosine)")

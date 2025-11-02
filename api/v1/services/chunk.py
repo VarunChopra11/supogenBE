@@ -144,7 +144,7 @@ class ChunkService:
                     all_chunks.append(chunk_doc)
             # Insert all chunks into MongoDB collection
             if all_chunks:
-                insert_embeddings(all_chunks)
+                await insert_embeddings(all_chunks)
 
             logger.info(f"Generated {len(all_chunks)} chunks from {url}")
             return all_chunks
