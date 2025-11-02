@@ -4,6 +4,8 @@ from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 import os
+import json
+import asyncio
 from api.v1.services.discord_services.discord import (
     authenticate_server, 
     ServerAlreadyRegisteredError,
@@ -11,8 +13,11 @@ from api.v1.services.discord_services.discord import (
     UserNotFoundError,
     InvalidTokenError,
     DatabaseError,
-    AuthenticationError
+    AuthenticationError,
+    send_message_stream,
 )
+
+from api.v1.db.session import DatabaseSession
 
 load_dotenv(override=True)
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -25,6 +30,44 @@ intents.message_content = True
 intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+def message_to_dict(message: discord.Message):
+    return {
+        "id": message.id,
+        "content": message.content,
+        "created_at": message.created_at.isoformat(),
+        "channel": {
+            "id": message.channel.id,
+            "name": getattr(message.channel, "name", None),
+            "type": str(message.channel.type),
+        },
+        "author": {
+            "id": message.author.id,
+            "name": message.author.name,
+            "global_name": getattr(message.author, "global_name", None),
+            "display_name": message.author.display_name,
+            "bot": message.author.bot,
+        },
+        "guild": {
+            "id": message.guild.id if message.guild else None,
+            "name": message.guild.name if message.guild else None,
+            "member_count": message.guild.member_count if message.guild else None,
+        } if message.guild else None,
+        "attachments": [
+            {
+                "id": a.id,
+                "filename": a.filename,
+                "size": a.size,
+                "url": a.url,
+                "content_type": a.content_type,
+            }
+            for a in message.attachments
+        ],
+        "mentions": [m.id for m in message.mentions],
+        "role_mentions": [r.id for r in message.role_mentions],
+        "type": str(message.type),
+        "flags": message.flags.value,
+    }
 
 @bot.event
 async def on_ready():
@@ -104,6 +147,75 @@ async def authenticate(interaction: discord.Interaction, token: str):
     except Exception as e:
         logging.error(f"Unexpected error during authentication: {e}")
         await interaction.followup.send("❌ An unexpected error occurred. Please try again later.", ephemeral=True)
+
+@bot.event
+async def on_message(message: discord.Message):
+    msg_json = json.dumps(message_to_dict(message), indent=4, ensure_ascii=False)
+    print("------------------------------------------------")
+    print(msg_json)
+    print("------------------------------------------------")
+    if message.author.bot:
+        return
+
+    if (bot.user not in message.mentions and 
+        not (message.reference and message.reference.resolved and message.reference.resolved.author.id == bot.user.id) and
+        not (isinstance(message.channel, discord.Thread) and message.channel.owner_id == bot.user.id)):
+        return
+
+    content = message.content.replace(f"<@{bot.user.id}>", "").strip()
+    if not content:
+        await message.reply("👋 Hi! Mention me with a message to chat.")
+        return
+    
+    try:
+        db = DatabaseSession.get_db()
+
+        server_id = str(message.guild.id) if message.guild else None
+
+        # Search server for user_id
+        server = await db["discord_servers"].find_one({"server_id": server_id}) if server_id else None
+        if not server:
+            await message.reply("❌ This server is not authenticated. Please ask the server admin to authenticate the bot using the `/authenticate` command.")
+            return
+        
+        user_id = server.get("owner_id") if server else None
+        if not user_id:
+            await message.reply("❌ Unable to identify server owner. Please contact support.")
+            return
+        
+        async with message.channel.typing():
+            response_stream = send_message_stream(
+                [{"type": "text", "text": content}], user_id=user_id, server_id=server_id
+            )
+
+            streamed_text = ""
+            thread = None
+            while True:
+                try:
+                    # Per-chunk timeout similar to previous behavior
+                    chunk = await asyncio.wait_for(anext(response_stream), timeout=30)
+                except StopAsyncIteration:
+                    break
+                streamed_text += chunk or ""
+                if isinstance(message.channel, discord.Thread):
+                    await message.reply(chunk)
+                else:
+                    if thread is None:
+                        thread = await message.create_thread(name="Chat Thread")
+                    await thread.send(chunk)
+
+        # fallback if empty
+        if not streamed_text:
+            await message.reply("⚠️ Sorry, I couldn't process that.")
+
+    except asyncio.TimeoutError:
+        await message.reply("⏱️ The model took too long to respond.")
+    except Exception as e:
+        logging.error(f"Error handling message: {e}", exc_info=True)
+        await message.reply("❌ Something went wrong while processing your request.")
+
+
+
 
 
 async def run_discord_bot_async():

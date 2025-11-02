@@ -1,9 +1,15 @@
 from api.v1.utils.crypto import fernet_decrypt
+from typing import AsyncGenerator
 import jwt
 from api.v1.config import auth_config
 from api.v1.db.session import DatabaseSession
 from datetime import datetime, timezone
 import logging
+from api.v1.services.embed import (
+    generate_text_embedding,
+    search_similar_docs,
+    get_openai_chat_completion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -208,3 +214,76 @@ async def get_user_servers(user_id: str) -> list:
     except Exception as e:
         logger.error(f"Error getting user servers: {e}")
         return []
+    
+async def send_message(messages, user_id: str, server_id: str) -> str:
+    """
+    Backward-compatible helper that consumes the streaming generator and
+    returns the full response as a single string.
+
+    Called by Discord bot. 'messages' is a list like:
+    [{"type": "text", "text": "your question"}]
+    The search is scoped to the given user_id and server_id.
+    """
+    try:
+        user_query = messages[0]["text"]
+        # Build prompt via the same steps as the stream version
+        query_embedding = await generate_text_embedding(user_query)
+        top_docs = search_similar_docs(query_embedding, top_k=4, user_id=user_id, server_id=server_id)
+        context = "\n\n".join([doc.get("text", "") for doc in top_docs])
+        prompt = f"""
+        You are a helpful AI assistant for SaaS documentation.
+        Use the below context to answer the user's question clearly and accurately.
+        If the answer isn't in the docs, say so.
+
+        ### Context:
+        {context}
+
+        ### Question:
+        {user_query}
+
+        Answer:
+        """
+        full_text = ""
+        async for chunk in get_openai_chat_completion(prompt):
+            full_text += chunk
+        return full_text or ""
+    except Exception as e:
+        return f"⚠️ Error: {e}"
+
+
+async def send_message_stream(messages, user_id: str, server_id: str) -> AsyncGenerator[str, None]:
+    """
+    Streaming version used by the Discord bot. Yields chunks of the model
+    response as they arrive.
+
+    Args:
+        messages: List like [{"type": "text", "text": "..."}]
+        user_id: The user's ID to scope search
+        server_id: The Discord server ID to scope search
+    Yields:
+        str chunks of the answer.
+    """
+    try:
+        user_query = messages[0]["text"]
+        query_embedding = await generate_text_embedding(user_query)
+        top_docs = search_similar_docs(query_embedding, top_k=4, user_id=user_id, server_id=server_id)
+        context = "\n\n".join([doc.get("text", "") for doc in top_docs])
+        prompt = f"""
+        You are a helpful AI assistant for SaaS documentation.
+        Use the below context to answer the user's question clearly and accurately.
+        If the answer isn't in the docs, say so.
+
+        ### Context:
+        {context}
+
+        ### Question:
+        {user_query}
+
+        Answer:
+        """
+        async for chunk in get_openai_chat_completion(prompt):
+            if chunk:
+                yield chunk
+    except Exception as e:
+        # Surface the error to the user as a single chunk
+        yield f"⚠️ Error: {e}"
