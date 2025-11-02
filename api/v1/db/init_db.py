@@ -1,6 +1,6 @@
 from .session import DatabaseSession
 from api.v1.config import db_config
-from .setup_indexes import setup_ttl_indexes
+from .setup_indexes import setup_ttl_indexes, setup_vector_index
 
 async def init_db():
     await DatabaseSession.connect(
@@ -10,7 +10,4 @@ async def init_db():
 
     # Ensure indexes only once during startup
     await setup_ttl_indexes()
-
-async def close_db():
-    await DatabaseSession.close()
-    
+    await setup_vector_index()   # add this line

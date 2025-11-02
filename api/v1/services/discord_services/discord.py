@@ -228,7 +228,9 @@ async def send_message(messages, user_id: str, server_id: str) -> str:
         user_query = messages[0]["text"]
         # Build prompt via the same steps as the stream version
         query_embedding = await generate_text_embedding(user_query)
-        top_docs = search_similar_docs(query_embedding, top_k=4, user_id=user_id, server_id=server_id)
+        top_docs = await search_similar_docs(
+            query_embedding, top_k=4, user_id=user_id, server_id=server_id
+        )
         context = "\n\n".join([doc.get("text", "") for doc in top_docs])
         prompt = f"""
         You are a helpful AI assistant for SaaS documentation.
@@ -266,7 +268,9 @@ async def send_message_stream(messages, user_id: str, server_id: str) -> AsyncGe
     try:
         user_query = messages[0]["text"]
         query_embedding = await generate_text_embedding(user_query)
-        top_docs = search_similar_docs(query_embedding, top_k=4, user_id=user_id, server_id=server_id)
+        top_docs = await search_similar_docs(
+            query_embedding, top_k=4, user_id=user_id, server_id=server_id
+        )
         context = "\n\n".join([doc.get("text", "") for doc in top_docs])
         prompt = f"""
         You are a helpful AI assistant for SaaS documentation.

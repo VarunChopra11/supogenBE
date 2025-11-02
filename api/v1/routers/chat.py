@@ -44,7 +44,7 @@ async def chat(
 			query_embedding = await generate_text_embedding(req.query)
 
 			# 2) Vector search scoped by user and server
-			top_docs = search_similar_docs(
+			top_docs = await search_similar_docs(
 				query_embedding=query_embedding,
 				user_id=user["user_id"],
 				server_id=req.server_id,

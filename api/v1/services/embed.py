@@ -72,13 +72,16 @@ def insert_embeddings(records: List[Dict[str, Any]]) -> None:
     db["embedded_documents"].insert_many(records, ordered=False)
 
 
-def search_similar_docs(
+async def search_similar_docs(
     query_embedding: List[float],
     user_id: str,
     server_id: str,
-    top_k: int = 4
+    top_k: int = 4,
 ) -> List[Dict[str, Any]]:
-    """Perform MongoDB Atlas vector search for similar documents."""
+    """
+    Perform MongoDB Atlas vector search for similar documents using Motor's async cursor.
+    Returns a list of result documents.
+    """
     if not query_embedding or not isinstance(query_embedding, list):
         raise ValueError("Query embedding must be a non-empty list of floats")
 
@@ -107,7 +110,7 @@ def search_similar_docs(
     db = DatabaseSession.get_db()
     if db is None:
         raise RuntimeError("Database connection not available")
-    
-    docs_list = list(db["embedded_documents"].aggregate(pipeline))
 
+    cursor = db["embedded_documents"].aggregate(pipeline)
+    docs_list = await cursor.to_list(length=top_k)
     return docs_list
