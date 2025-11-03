@@ -7,8 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.v1.db.init_db import init_db, close_db
 from contextlib import asynccontextmanager
 from api.v1.services.discord_services.discord_bot import run_discord_bot_async
+from dotenv import load_dotenv
 import asyncio
 import uvicorn
+import os
+
+load_dotenv(override=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,7 +52,12 @@ async def wakeup_head():
 
 async def start_fastapi():
     """Start FastAPI server on the current event loop."""
-    config = uvicorn.Config("main:app", host="0.0.0.0", port=8000, reload=False, loop="asyncio")
+    mode = os.getenv("MODE", "development")
+    if mode == "development":
+        deployment_host = "localhost"
+    else:
+        deployment_host = "0.0.0.0"
+    config = uvicorn.Config("main:app", host=deployment_host, port=8000, reload=False, loop="asyncio")
     server = uvicorn.Server(config)
     await server.serve()
 

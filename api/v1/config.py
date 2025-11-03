@@ -50,6 +50,19 @@ class AIConfig:
     def OPENAI_API_KEY(self):
         return os.getenv("OPENAI_API_KEY")
     
+class DeplyoymentConfig:
+    def __init__(self):
+        load_dotenv(override=True)
+
+    @property
+    def MODE(self):
+        return os.getenv("MODE", "development")
+    
+    @property
+    def DOMAIN(self):
+        return os.getenv("DOMAIN", None)
+        
 auth_config = AuthConfig()
 db_config = DBConfig()
 ai_config = AIConfig()
+deploymentConfig = DeplyoymentConfig()

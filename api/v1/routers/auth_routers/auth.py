@@ -4,6 +4,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from typing import Optional
 from api.v1.services.auth_services.auth import AuthService
 from api.v1.schemas.users import UserResponse
+from api.v1.config import deploymentConfig
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -38,6 +39,13 @@ async def handshake(
                 "message": "Handshake successful",
             },
         )
+
+        
+        if deploymentConfig.MODE == "development":
+            domain = None
+        else:
+            domain = deploymentConfig.DOMAIN
+
         resp.set_cookie(
             key="access_token",
             value=result["token"],
@@ -45,7 +53,7 @@ async def handshake(
             httponly=True,
             secure=True,
             samesite="none",
-            domain=".supogen.com",
+            domain=domain,
         )
         return resp
 
@@ -81,6 +89,12 @@ async def get_user(request: Request, response: Response):
             },
             status_code=status.HTTP_200_OK
         )
+
+        if deploymentConfig.MODE == "development":
+            domain = None
+        else:
+            domain = deploymentConfig.DOMAIN
+
         resp.set_cookie(
             key="csrf_token",
             value=csrf_token,
@@ -88,7 +102,7 @@ async def get_user(request: Request, response: Response):
             httponly=True,
             secure=True,
             samesite="none",
-            domain=".supogen.com"
+            domain=domain,
         )
         return resp
     
@@ -108,10 +122,16 @@ async def get_user(request: Request, response: Response):
 @router.post("/logout")
 async def logout():
     response = Response(content="Logged out successfully")
+
+    if deploymentConfig.MODE == "development":
+        domain = None
+    else:
+        domain = deploymentConfig.DOMAIN
+
     # Delete access_token cookie
     response.delete_cookie(
         key="access_token",
-        domain=".supogen.com",
+        domain=domain,
         secure=True,
         httponly=True,
         samesite="none"
@@ -119,7 +139,7 @@ async def logout():
     # Delete csrf_token cookie
     response.delete_cookie(
         key="csrf_token",
-        domain=".supogen.com",
+        domain=domain,
         secure=True,
         httponly=True,
         samesite="none"
