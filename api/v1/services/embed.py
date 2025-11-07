@@ -1,13 +1,21 @@
 from typing import Optional, List, Dict, Any, AsyncGenerator
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
+from openai import AsyncAzureOpenAI, AsyncOpenAI, APIError, APIConnectionError, RateLimitError
 from api.v1.db.session import DatabaseSession
 from api.v1.config import ai_config
 
 load_dotenv(override=True)
 
 try:
-    async_client = AsyncOpenAI(api_key=ai_config.OPENAI_API_KEY)
+    # Prefer Azure OpenAI if endpoint provided, else default to standard OpenAI
+    if ai_config.AZURE_OPENAI_ENDPOINT:
+        async_client = AsyncAzureOpenAI(
+            api_key=ai_config.AZURE_OPENAI_API_KEY,
+            azure_endpoint=f"{ai_config.AZURE_OPENAI_ENDPOINT}",
+            api_version="2024-08-01-preview",
+        )
+    else:
+        async_client = AsyncOpenAI(api_key=ai_config.OPENAI_API_KEY)
 except Exception as e:
     raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
 
@@ -24,11 +32,11 @@ async def generate_text_embedding(text: str) -> Optional[List[float]]:
         )
         return response.data[0].embedding
     except RateLimitError as e:
-        raise APIError("Rate limit exceeded. Please try again later.") from e
+        raise RuntimeError("Rate limit exceeded. Please try again later.") from e
     except APIConnectionError as e:
-        raise APIError("Connection to OpenAI failed. Check your internet connection.") from e
+        raise RuntimeError("Connection to OpenAI failed. Check your internet connection.") from e
     except APIError as e:
-        raise APIError(f"OpenAI API error: {e}") from e
+        raise RuntimeError(f"OpenAI API error: {e}") from e
     except Exception as e:
         raise RuntimeError(f"Unexpected error generating embedding: {e}") from e
 
@@ -47,15 +55,17 @@ async def get_openai_chat_completion(prompt: str) -> AsyncGenerator[str, None]:
             stream=True
         )
         async for chunk in stream:
+            if not chunk.choices or not chunk.choices[0].delta:
+                continue
             delta = chunk.choices[0].delta.content
             if delta:
                 yield delta
     except RateLimitError as e:
-        raise APIError("Rate limit exceeded. Please try again later.") from e
+        raise RuntimeError("Rate limit exceeded. Please try again later.") from e
     except APIConnectionError as e:
-        raise APIError("Connection to OpenAI failed. Check your internet connection.") from e
+        raise RuntimeError("Connection to OpenAI failed. Check your internet connection.") from e
     except APIError as e:
-        raise APIError(f"OpenAI API error: {e}") from e
+        raise RuntimeError(f"OpenAI API error: {e}") from e
     except Exception as e:
         raise RuntimeError(f"Unexpected error in chat completion: {e}") from e
 

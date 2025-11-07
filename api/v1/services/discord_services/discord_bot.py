@@ -123,8 +123,18 @@ async def on_message(message: discord.Message):
         if isinstance(message.channel, discord.Thread):
             await message.reply(response)
         else:
-            thread = await message.create_thread(name="Chat Thread")
-            await thread.send(response)
+            try:
+                thread = await message.create_thread(name=f"Chat Thread {message.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                await thread.send(response)
+            except discord.HTTPException as e:
+                # If thread creation fails (e.g., thread already exists), reply in channel
+                if e.code == 160004:  # Thread already exists error code
+                    logging.info(f"Thread already exists for message {message.id}, replying in channel")
+                    await message.reply(response)
+                else:
+                    # For other HTTP exceptions, still try to reply in channel
+                    logging.warning(f"Failed to create thread (code: {e.code}): {e}")
+                    await message.reply(response)
 
     except asyncio.TimeoutError:
         await message.reply("⏱️ The model took too long to respond.")
