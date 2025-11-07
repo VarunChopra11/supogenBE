@@ -54,7 +54,7 @@ async def chat(
 			sources: Set[str] = {d.get("doc_url") for d in top_docs if d.get("doc_url")}
 
 			# Stream sources first so client can render citations early
-			yield "event: sources\n" + f"data: {json.dumps(sources)}\n\n"
+			yield "event: sources\n" + f"data: {json.dumps(list(sources))}\n\n"
 
 			# 3) Build prompt with retrieved context
 			context = "\n\n".join([d.get("text", "") for d in top_docs])
