@@ -50,6 +50,16 @@ class AIConfig:
     def OPENAI_API_KEY(self):
         return os.getenv("OPENAI_API_KEY")
     
+    @property
+    def AZURE_OPENAI_API_KEY(self):
+        """Primary Azure OpenAI API key (falls back to OPENAI_API_KEY if not set)."""
+        return os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+    @property
+    def AZURE_OPENAI_ENDPOINT(self):
+        """Azure OpenAI endpoint base URL, e.g. https://your-resource.openai.azure.com."""
+        return os.getenv("AZURE_OPENAI_ENDPOINT")
+    
 class DeplyoymentConfig:
     def __init__(self):
         load_dotenv(override=True)
