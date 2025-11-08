@@ -1,5 +1,5 @@
 from api.v1.utils.crypto import fernet_decrypt
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 import jwt
 from api.v1.config import auth_config
 from api.v1.db.session import DatabaseSession
@@ -9,7 +9,10 @@ from api.v1.services.embed import (
     generate_text_embedding,
     search_similar_docs,
     get_openai_chat_completion,
+    get_openai_chat_completion_with_history,
 )
+from api.v1.services.chats import chat_service
+from api.v1.schemas.chats import ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -215,41 +218,122 @@ async def get_user_servers(user_id: str) -> list:
         logger.error(f"Error getting user servers: {e}")
         return []
     
-async def send_message(messages, user_id: str, server_id: str) -> str:
+async def send_message(
+    messages, 
+    user_id: str, 
+    server_id: str, 
+    thread_id: Optional[str] = None,
+    channel_id: Optional[str] = None
+) -> str:
     """
-    Backward-compatible helper that consumes the streaming generator and
-    returns the full response as a single string.
-
-    Called by Discord bot. 'messages' is a list like:
-    [{"type": "text", "text": "your question"}]
-    The search is scoped to the given user_id and server_id.
+    Enhanced Discord message handler with chat history management.
+    
+    - Retrieves existing chat if thread_id is provided
+    - Creates new chat if thread is new
+    - Includes full conversation history in context
+    - Stores user message and bot response after completion
+    
+    Args:
+        messages: List like [{"type": "text", "text": "your question"}]
+        user_id: The user's ID to scope search
+        server_id: The Discord server ID to scope search
+        thread_id: Discord thread ID for conversation tracking
+        channel_id: Discord channel ID
+        
+    Returns:
+        str: The complete bot response
     """
+    collected_response = []
+    chat_id = None
+    
     try:
         user_query = messages[0]["text"]
-        # Build prompt via the same steps as the stream version
+        
+        # 1) Check for existing chat in this thread
+        existing_chat = None
+        if thread_id:
+            existing_chat = await chat_service.get_discord_chat_by_thread(
+                thread_id=thread_id, user_id=user_id
+            )
+            if existing_chat:
+                chat_id = existing_chat.chat_id
+                logger.info(f"Found existing chat {chat_id} for thread {thread_id}")
+        
+        # 2) Perform vector search for context
         query_embedding = await generate_text_embedding(user_query)
         top_docs = await search_similar_docs(
             query_embedding, top_k=4, user_id=user_id, server_id=server_id
         )
         context = "\n\n".join([doc.get("text", "") for doc in top_docs])
-        prompt = f"""
-        You are a helpful AI assistant for SaaS documentation.
-        Use the below context to answer the user's question clearly and accurately.
-        If the answer isn't in the docs, say so.
-
-        ### Context:
-        {context}
-
-        ### Question:
-        {user_query}
-
-        Answer:
-        """
-        full_text = ""
-        async for chunk in get_openai_chat_completion(prompt):
-            full_text += chunk
-        return full_text or ""
+        if not context.strip():
+            context = "No relevant context retrieved."
+        
+        # Extract sources from retrieved documents
+        sources = list({doc.get("doc_url") for doc in top_docs if doc.get("doc_url")})
+        
+        # 3) Build messages array with history
+        msg_array = []
+        
+        # System message with context
+        system_prompt = (
+            "You are a helpful AI assistant for SaaS documentation. "
+            "Use the below context to answer the user's question clearly and accurately. "
+            "If the answer isn't in the docs, say so.\n\n"
+            f"### Context:\n{context}"
+        )
+        msg_array.append({"role": "system", "content": system_prompt})
+        
+        # Add conversation history if continuing a thread
+        if existing_chat and existing_chat.messages:
+            for msg in existing_chat.messages:
+                msg_array.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            logger.info(f"Added {len(existing_chat.messages)} historical messages to context")
+        
+        # Add current user query
+        msg_array.append({"role": "user", "content": user_query})
+        
+        # 4) Get completion with full context
+        async for chunk in get_openai_chat_completion_with_history(msg_array):
+            collected_response.append(chunk)
+        
+        full_response = "".join(collected_response)
+        
+        # 5) Store chat messages
+        try:
+            if not chat_id:
+                # Create new chat for this thread
+                chat_id = await chat_service.create_discord_chat(
+                    user_id=user_id,
+                    server_id=server_id,
+                    channel_id=channel_id,
+                    thread_id=thread_id,
+                )
+                logger.info(f"Created new Discord chat {chat_id} for thread {thread_id}")
+            
+            # Store user message
+            user_msg = ChatMessage(role="user", content=user_query)
+            await chat_service.append_discord_message(chat_id=chat_id, message=user_msg)
+            
+            # Store assistant response with sources
+            assistant_msg = ChatMessage(
+                role="assistant",
+                content=full_response,
+                sources=sources if sources else None
+            )
+            await chat_service.append_discord_message(chat_id=chat_id, message=assistant_msg)
+            
+            logger.info(f"Successfully stored Discord messages for chat {chat_id}")
+        except Exception as store_error:
+            logger.error(f"Failed to store Discord chat messages: {store_error}", exc_info=True)
+            # Don't fail the response if storage fails
+        
+        return full_response or ""
+        
     except Exception as e:
+        logger.error(f"Error in send_message: {e}", exc_info=True)
         return f"⚠️ Error: {e}"
 
 
