@@ -111,7 +111,7 @@ async def chat(
 			if existing_chat and existing_chat.messages:
 				for msg in existing_chat.messages:
 					messages.append({
-						"role": "assistant" if msg.role == "system" else msg.role,
+						"role": msg.role,
 						"content": msg.content
 					})
 			
@@ -156,8 +156,12 @@ async def chat(
 						chat_id=final_chat_id, message=user_msg
 					)
 					
-					# Store assistant response
-					assistant_msg = ChatMessage(role="system", content=complete_response)
+					# Store assistant response with sources
+					assistant_msg = ChatMessage(
+						role="assistant",
+						content=complete_response,
+						sources=list(sources) if sources else None
+					)
 					await chat_service.append_playground_message(
 						chat_id=final_chat_id, message=assistant_msg
 					)

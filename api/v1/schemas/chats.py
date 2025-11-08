@@ -4,9 +4,10 @@ from pydantic import BaseModel, Field
 
 
 class ChatMessage(BaseModel):
-    role: Literal["user", "system"]
+    role: Literal["user", "assistant"]
     content: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    sources: Optional[List[str]] = Field(default=None, description="Source URLs used to generate assistant responses")
 
 
 class PlaygroundChat(BaseModel):

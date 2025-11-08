@@ -268,6 +268,9 @@ async def send_message(
         if not context.strip():
             context = "No relevant context retrieved."
         
+        # Extract sources from retrieved documents
+        sources = list({doc.get("doc_url") for doc in top_docs if doc.get("doc_url")})
+        
         # 3) Build messages array with history
         msg_array = []
         
@@ -284,7 +287,7 @@ async def send_message(
         if existing_chat and existing_chat.messages:
             for msg in existing_chat.messages:
                 msg_array.append({
-                    "role": "assistant" if msg.role == "system" else msg.role,
+                    "role": msg.role,
                     "content": msg.content
                 })
             logger.info(f"Added {len(existing_chat.messages)} historical messages to context")
@@ -314,8 +317,12 @@ async def send_message(
             user_msg = ChatMessage(role="user", content=user_query)
             await chat_service.append_discord_message(chat_id=chat_id, message=user_msg)
             
-            # Store assistant response
-            assistant_msg = ChatMessage(role="system", content=full_response)
+            # Store assistant response with sources
+            assistant_msg = ChatMessage(
+                role="assistant",
+                content=full_response,
+                sources=sources if sources else None
+            )
             await chat_service.append_discord_message(chat_id=chat_id, message=assistant_msg)
             
             logger.info(f"Successfully stored Discord messages for chat {chat_id}")
