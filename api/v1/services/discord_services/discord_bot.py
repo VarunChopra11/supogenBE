@@ -115,12 +115,30 @@ async def on_message(message: discord.Message):
             # Determine thread_id and channel_id for chat history
             thread_id = None
             channel_id = str(message.channel.id)
+            created_thread = None
             
             if isinstance(message.channel, discord.Thread):
                 thread_id = str(message.channel.id)
                 # For threads, the parent channel is different from the thread itself
                 if hasattr(message.channel, 'parent_id') and message.channel.parent_id:
                     channel_id = str(message.channel.parent_id)
+            else:
+                # Not in a thread - create one BEFORE processing to get thread_id
+                try:
+                    created_thread = await message.create_thread(
+                        name=f"Chat Thread {message.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    thread_id = str(created_thread.id)
+                    channel_id = str(message.channel.id)
+                    logging.info(f"Created new thread {thread_id} for message {message.id}")
+                except discord.HTTPException as e:
+                    if e.code == 160004:  # Thread already exists
+                        logging.info(f"Thread already exists for message {message.id}")
+                        # Try to find the existing thread
+                        # For now, continue without thread_id
+                        pass
+                    else:
+                        logging.warning(f"Failed to create thread (code: {e.code}): {e}")
             
             response = await asyncio.wait_for(
                 send_message(
@@ -136,27 +154,16 @@ async def on_message(message: discord.Message):
         if not response or not isinstance(response, str):
             response = "⚠️ Sorry, I couldn't process that."
 
-        # Handle response delivery based on channel type
+        # Send response in appropriate location
         if isinstance(message.channel, discord.Thread):
             # Already in a thread, just reply
             await message.reply(response)
+        elif created_thread:
+            # We created a thread earlier, send response there
+            await created_thread.send(response)
         else:
-            # Not in a thread, create one for ongoing conversation
-            try:
-                thread = await message.create_thread(
-                    name=f"Chat Thread {message.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
-                )
-                await thread.send(response)
-                
-            except discord.HTTPException as e:
-                # If thread creation fails (e.g., thread already exists), reply in channel
-                if e.code == 160004:  # Thread already exists error code
-                    logging.info(f"Thread already exists for message {message.id}, replying in channel")
-                    await message.reply(response)
-                else:
-                    # For other HTTP exceptions, still try to reply in channel
-                    logging.warning(f"Failed to create thread (code: {e.code}): {e}")
-                    await message.reply(response)
+            # Thread creation failed earlier, reply in channel
+            await message.reply(response)
 
     except asyncio.TimeoutError:
         await message.reply("⏱️ The model took too long to respond.")
