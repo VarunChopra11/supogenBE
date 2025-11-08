@@ -70,6 +70,42 @@ async def get_openai_chat_completion(prompt: str) -> AsyncGenerator[str, None]:
         raise RuntimeError(f"Unexpected error in chat completion: {e}") from e
 
 
+async def get_openai_chat_completion_with_history(
+    messages: List[Dict[str, str]]
+) -> AsyncGenerator[str, None]:
+    """
+    Stream GPT-4o-mini chat completions with full message history.
+    
+    Args:
+        messages: List of message dicts with 'role' and 'content' keys
+    """
+    if not messages or not isinstance(messages, list):
+        raise ValueError("Messages must be a non-empty list")
+
+    try:
+        stream = await async_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.2,
+            max_tokens=600,
+            stream=True
+        )
+        async for chunk in stream:
+            if not chunk.choices or not chunk.choices[0].delta:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+    except RateLimitError as e:
+        raise RuntimeError("Rate limit exceeded. Please try again later.") from e
+    except APIConnectionError as e:
+        raise RuntimeError("Connection to OpenAI failed. Check your internet connection.") from e
+    except APIError as e:
+        raise RuntimeError(f"OpenAI API error: {e}") from e
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error in chat completion: {e}") from e
+
+
 async def insert_embeddings(records: List[Dict[str, Any]]) -> None:
     """Insert embedding records into MongoDB collection."""
     db = DatabaseSession.get_db()

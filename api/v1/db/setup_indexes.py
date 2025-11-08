@@ -12,6 +12,19 @@ async def setup_ttl_indexes():
 
     print("✅ TTL index ensured on invalid_tokens.added_at (6 minutes)")
 
+    # Chats: common lookup pattern and sorting
+    await db["playground_chats"].create_index(
+        [("user_id", 1), ("server_id", 1), ("updated_at", -1)],
+        name="playground_user_server_updated_idx",
+    )
+    await db["playground_chats"].create_index("chat_id", unique=True, name="playground_chat_id_uidx")
+
+    await db["discord_chats"].create_index(
+        [("user_id", 1), ("server_id", 1), ("updated_at", -1)],
+        name="discord_user_server_updated_idx",
+    )
+    await db["discord_chats"].create_index("chat_id", unique=True, name="discord_chat_id_uidx")
+
 
 # async def setup_vector_index():
 #     """Ensure vector search index exists for document chunks."""
