@@ -24,6 +24,12 @@ async def setup_ttl_indexes():
         name="discord_user_server_updated_idx",
     )
     await db["discord_chats"].create_index("chat_id", unique=True, name="discord_chat_id_uidx")
+    
+    # Index for thread_id lookup (Discord chat history)
+    await db["discord_chats"].create_index(
+        [("thread_id", 1), ("user_id", 1)],
+        name="discord_thread_user_idx",
+    )
 
 
 # async def setup_vector_index():

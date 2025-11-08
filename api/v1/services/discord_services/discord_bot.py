@@ -112,20 +112,42 @@ async def on_message(message: discord.Message):
             return
         
         async with message.channel.typing():
+            # Determine thread_id and channel_id for chat history
+            thread_id = None
+            channel_id = str(message.channel.id)
+            
+            if isinstance(message.channel, discord.Thread):
+                thread_id = str(message.channel.id)
+                # For threads, the parent channel is different from the thread itself
+                if hasattr(message.channel, 'parent_id') and message.channel.parent_id:
+                    channel_id = str(message.channel.parent_id)
+            
             response = await asyncio.wait_for(
-                send_message([{"type": "text", "text": content}], user_id=user_id, server_id=server_id),
+                send_message(
+                    [{"type": "text", "text": content}], 
+                    user_id=user_id, 
+                    server_id=server_id,
+                    thread_id=thread_id,
+                    channel_id=channel_id
+                ),
                 timeout=30
             )
 
         if not response or not isinstance(response, str):
             response = "⚠️ Sorry, I couldn't process that."
 
+        # Handle response delivery based on channel type
         if isinstance(message.channel, discord.Thread):
+            # Already in a thread, just reply
             await message.reply(response)
         else:
+            # Not in a thread, create one for ongoing conversation
             try:
-                thread = await message.create_thread(name=f"Chat Thread {message.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                thread = await message.create_thread(
+                    name=f"Chat Thread {message.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
                 await thread.send(response)
+                
             except discord.HTTPException as e:
                 # If thread creation fails (e.g., thread already exists), reply in channel
                 if e.code == 160004:  # Thread already exists error code

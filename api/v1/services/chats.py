@@ -107,5 +107,33 @@ class ChatService:
             },
         )
 
+    async def get_discord_chat_by_thread(
+        self,
+        thread_id: str,
+        user_id: str,
+    ) -> Optional[DiscordChat]:
+        """Get a Discord chat by thread_id, ensuring it belongs to the user."""
+        db = DatabaseSession.get_db()
+        doc = await db[self.discord_collection].find_one(
+            {"thread_id": str(thread_id), "user_id": user_id}
+        )
+        if doc:
+            return DiscordChat(**doc)
+        return None
+
+    async def get_discord_chat_by_id(
+        self,
+        chat_id: str,
+        user_id: str,
+    ) -> Optional[DiscordChat]:
+        """Get a Discord chat by chat_id, ensuring it belongs to the user."""
+        db = DatabaseSession.get_db()
+        doc = await db[self.discord_collection].find_one(
+            {"chat_id": chat_id, "user_id": user_id}
+        )
+        if doc:
+            return DiscordChat(**doc)
+        return None
+
 
 chat_service = ChatService()
