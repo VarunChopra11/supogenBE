@@ -2,6 +2,7 @@ fastapi
 uvicorn
 python-dotenv
 requests
+httpx
 motor
 pydantic
 pydantic[email]
@@ -11,3 +12,4 @@ python-jose
 discord
 openai
 markdown-it-py
+firecrawl-py

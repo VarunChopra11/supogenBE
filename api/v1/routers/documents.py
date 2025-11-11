@@ -22,10 +22,12 @@ async def embed_documents(
     _: bool = Depends(csrf_verification.verify_csrf)
 ):
     """
-    Process a markdown document from URL and create vector-ready chunks.
+    Process any web document from URL and create vector-ready chunks.
+    
+    Supports both markdown files (.md) and general web pages.
     
     - **server_id**: UUID of the server to associate with chunks
-    - **markdown_url**: Public URL of the markdown document to process
+    - **document_url**: Public URL of the document to process (markdown file or any web page)
     """
     try:
         # Validate request parameters

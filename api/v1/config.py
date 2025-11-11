@@ -60,6 +60,11 @@ class AIConfig:
         """Azure OpenAI endpoint base URL, e.g. https://your-resource.openai.azure.com."""
         return os.getenv("AZURE_OPENAI_ENDPOINT")
     
+    @property
+    def FIRECRAWL_API_KEY(self):
+        """Firecrawl API key for web scraping and URL-to-markdown conversion."""
+        return os.getenv("FIRECRAWL_API_KEY")
+    
 class DeplyoymentConfig:
     def __init__(self):
         load_dotenv(override=True)

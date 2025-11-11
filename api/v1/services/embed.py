@@ -51,7 +51,6 @@ async def get_openai_chat_completion(prompt: str) -> AsyncGenerator[str, None]:
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt.strip()}],
             temperature=0.2,
-            max_tokens=600,
             stream=True
         )
         async for chunk in stream:

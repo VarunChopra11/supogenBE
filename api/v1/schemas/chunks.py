@@ -45,7 +45,7 @@ class MarkdownProcessRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "server_id": "123e4567-e89b-12d3-a456-426614174000",
-                "document_url": "https://example.com/docs/api.md"
+                "document_url": "https://example.com/docs/guide"
             }
         }
     }
