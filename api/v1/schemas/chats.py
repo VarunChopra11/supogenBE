@@ -28,5 +28,6 @@ class DiscordChat(BaseModel):
     thread_id: Optional[str] = None
     messages: List[ChatMessage] = Field(default_factory=list)
     is_resolved: bool = Field(default=False, description="Whether the query has been resolved")
+    resolution_time: Optional[float] = Field(default=None, description="Time taken to resolve the query in seconds")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

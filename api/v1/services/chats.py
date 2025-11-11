@@ -142,6 +142,7 @@ class ChatService:
     ) -> bool:
         """
         Mark a Discord chat as resolved or pending based on thread_id.
+        Updates resolution_time based on the resolution status.
         
         Args:
             thread_id: The Discord thread ID
@@ -151,20 +152,44 @@ class ChatService:
             bool: True if update was successful, False otherwise
         """
         db = DatabaseSession.get_db()
+        
+        # First, fetch the chat to get created_at for resolution_time calculation
+        chat_doc = await db[self.discord_collection].find_one(
+            {"thread_id": str(thread_id)}
+        )
+        
+        if not chat_doc:
+            return False
+        
+        current_time = datetime.now(timezone.utc)
+        update_fields = {
+            "is_resolved": is_resolved,
+            "updated_at": current_time,
+        }
+        
+        # Calculate resolution_time based on is_resolved status
+        if is_resolved:
+            # When marking as resolved, calculate time from created_at
+            created_at = chat_doc.get("created_at")
+            if created_at:
+                resolution_time = (current_time - created_at).total_seconds()
+                update_fields["resolution_time"] = resolution_time
+            else:
+                update_fields["resolution_time"] = None
+        else:
+            # When marking as pending, set resolution_time to None
+            update_fields["resolution_time"] = None
+        
         result = await db[self.discord_collection].update_one(
             {"thread_id": str(thread_id)},
-            {
-                "$set": {
-                    "is_resolved": is_resolved,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
+            {"$set": update_fields},
         )
         return result.modified_count > 0
 
     async def auto_resolve_old_chats(self, days_threshold: int = 4) -> int:
         """
         Auto-resolve Discord chats that haven't been updated in specified days.
+        Calculates resolution_time for each auto-resolved chat.
         
         Args:
             days_threshold: Number of days after which to auto-resolve (default: 4)
@@ -176,20 +201,38 @@ class ChatService:
         
         db = DatabaseSession.get_db()
         cutoff_time = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+        current_time = datetime.now(timezone.utc)
         
-        result = await db[self.discord_collection].update_many(
+        # Find all chats that need to be auto-resolved
+        chats_to_resolve = await db[self.discord_collection].find(
             {
                 "is_resolved": False,
                 "updated_at": {"$lte": cutoff_time}
-            },
-            {
-                "$set": {
-                    "is_resolved": True,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-        )
-        return result.modified_count
+            }
+        ).to_list(length=None)
+        
+        # Update each chat individually to calculate resolution_time
+        updated_count = 0
+        for chat in chats_to_resolve:
+            created_at = chat.get("created_at")
+            resolution_time = None
+            
+            if created_at:
+                resolution_time = (current_time - created_at).total_seconds()
+            
+            await db[self.discord_collection].update_one(
+                {"_id": chat["_id"]},
+                {
+                    "$set": {
+                        "is_resolved": True,
+                        "resolution_time": resolution_time,
+                        "updated_at": current_time,
+                    }
+                },
+            )
+            updated_count += 1
+        
+        return updated_count
 
 
 chat_service = ChatService()
