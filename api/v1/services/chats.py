@@ -172,6 +172,9 @@ class ChatService:
             # When marking as resolved, calculate time from created_at
             created_at = chat_doc.get("created_at")
             if created_at:
+                # Ensure created_at is timezone-aware
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
                 resolution_time = (current_time - created_at).total_seconds()
                 update_fields["resolution_time"] = resolution_time
             else:
@@ -218,6 +221,9 @@ class ChatService:
             resolution_time = None
             
             if created_at:
+                # Ensure created_at is timezone-aware
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
                 resolution_time = (current_time - created_at).total_seconds()
             
             await db[self.discord_collection].update_one(
