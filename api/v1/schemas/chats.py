@@ -27,5 +27,6 @@ class DiscordChat(BaseModel):
     channel_id: Optional[str] = None
     thread_id: Optional[str] = None
     messages: List[ChatMessage] = Field(default_factory=list)
+    is_resolved: bool = Field(default=False, description="Whether the query has been resolved")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

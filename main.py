@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.v1.db.init_db import init_db, close_db
 from contextlib import asynccontextmanager
 from api.v1.services.discord_services.discord_bot import run_discord_bot_async
+from api.v1.tasks import start_auto_resolve_task
 from dotenv import load_dotenv
 import asyncio
 import uvicorn
@@ -17,6 +18,8 @@ load_dotenv(override=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Start the auto-resolve background task
+    await start_auto_resolve_task()
     yield
     await close_db()
 

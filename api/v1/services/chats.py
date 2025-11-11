@@ -135,5 +135,61 @@ class ChatService:
             return DiscordChat(**doc)
         return None
 
+    async def mark_discord_chat_resolved(
+        self,
+        thread_id: str,
+        is_resolved: bool,
+    ) -> bool:
+        """
+        Mark a Discord chat as resolved or pending based on thread_id.
+        
+        Args:
+            thread_id: The Discord thread ID
+            is_resolved: True to mark as resolved, False to mark as pending
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        db = DatabaseSession.get_db()
+        result = await db[self.discord_collection].update_one(
+            {"thread_id": str(thread_id)},
+            {
+                "$set": {
+                    "is_resolved": is_resolved,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        return result.modified_count > 0
+
+    async def auto_resolve_old_chats(self, days_threshold: int = 4) -> int:
+        """
+        Auto-resolve Discord chats that haven't been updated in specified days.
+        
+        Args:
+            days_threshold: Number of days after which to auto-resolve (default: 4)
+            
+        Returns:
+            int: Number of chats auto-resolved
+        """
+        from datetime import timedelta
+        
+        db = DatabaseSession.get_db()
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+        
+        result = await db[self.discord_collection].update_many(
+            {
+                "is_resolved": False,
+                "updated_at": {"$lte": cutoff_time}
+            },
+            {
+                "$set": {
+                    "is_resolved": True,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        return result.modified_count
+
 
 chat_service = ChatService()
