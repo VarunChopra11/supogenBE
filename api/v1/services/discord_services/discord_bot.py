@@ -28,6 +28,7 @@ intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
 intents.guilds = True
+intents.reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -85,9 +86,11 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    if (bot.user not in message.mentions and 
-        not (message.reference and message.reference.resolved and message.reference.resolved.author.id == bot.user.id) and
-        not (isinstance(message.channel, discord.Thread) and message.channel.owner_id == bot.user.id)):
+    if (
+        bot.user not in message.mentions
+        and not (message.reference and message.reference.resolved and message.reference.resolved.author.id == bot.user.id)
+        and not (isinstance(message.channel, discord.Thread) and message.channel.owner_id == bot.user.id)
+    ):
         return
 
     content = message.content.replace(f"<@{bot.user.id}>", "").strip()
@@ -103,7 +106,9 @@ async def on_message(message: discord.Message):
         # Search server for user_id
         server = await db["discord_servers"].find_one({"server_id": server_id}) if server_id else None
         if not server:
-            await message.reply("❌ This server is not authenticated. Please ask the server admin to authenticate the bot using the `/authenticate` command.")
+            await message.reply(
+                "❌ This server is not authenticated. Please ask the server admin to authenticate the bot using the `/authenticate` command."
+            )
             return
         
         user_id = server.get("user_id") if server else None
@@ -134,9 +139,6 @@ async def on_message(message: discord.Message):
                 except discord.HTTPException as e:
                     if e.code == 160004:  # Thread already exists
                         logging.info(f"Thread already exists for message {message.id}")
-                        # Try to find the existing thread
-                        # For now, continue without thread_id
-                        pass
                     else:
                         logging.warning(f"Failed to create thread (code: {e.code}): {e}")
             
@@ -146,24 +148,33 @@ async def on_message(message: discord.Message):
                     user_id=user_id, 
                     server_id=server_id,
                     thread_id=thread_id,
-                    channel_id=channel_id
+                    channel_id=channel_id,
                 ),
-                timeout=30
+                timeout=30,
             )
 
         if not response or not isinstance(response, str):
             response = "⚠️ Sorry, I couldn't process that."
 
-        # Send response in appropriate location
+        # Add info message at the end of bot response
+        response += "\n\n💡 *React to let us know if the bot resolved your query or not.*"
+
+        # Send response and add reactions
+        bot_reply = None
         if isinstance(message.channel, discord.Thread):
-            # Already in a thread, just reply
-            await message.reply(response)
+            bot_reply = await message.reply(response)
         elif created_thread:
-            # We created a thread earlier, send response there
-            await created_thread.send(response)
+            bot_reply = await created_thread.send(response)
         else:
-            # Thread creation failed earlier, reply in channel
-            await message.reply(response)
+            bot_reply = await message.reply(response)
+
+        # Add thumbs up/down reactions
+        if bot_reply:
+            try:
+                await bot_reply.add_reaction("👍")
+                await bot_reply.add_reaction("👎")
+            except Exception as e:
+                logging.warning(f"Failed to add reactions: {e}")
 
     except asyncio.TimeoutError:
         await message.reply("⏱️ The model took too long to respond.")
@@ -267,28 +278,31 @@ async def authenticate(interaction: discord.Interaction, token: str):
         authenticated: bool = await authenticate_server(auth_data)
         if authenticated:
             await interaction.followup.send(
-                "✅ Authentication successful! The bot is now linked to your Discord server.", 
-                ephemeral=True
+                "✅ Authentication successful! The bot is now linked to your Discord server.", ephemeral=True
             )
         else:
             await interaction.followup.send("❌ Authentication failed due to an unknown error.", ephemeral=True)
     
     except ServerAlreadyRegisteredError as e:
         logging.warning(f"Server already registered: {e}")
-        await interaction.followup.send("❌ This server is already registered with the bot. Please contact support if this is an error.", ephemeral=True)
-    
+        await interaction.followup.send(
+            "❌ This server is already registered with the bot. Please contact support if this is an error.", ephemeral=True
+        )
     except TokenAlreadyUsedError as e:
         logging.warning(f"Token already used: {e}")
-        await interaction.followup.send("❌ This token has already been used. Please generate a new token from the web dashboard.", ephemeral=True)
-    
+        await interaction.followup.send(
+            "❌ This token has already been used. Please generate a new token from the web dashboard.", ephemeral=True
+        )
     except UserNotFoundError as e:
         logging.warning(f"User not found: {e}")
-        await interaction.followup.send("❌ User account not found. Please make sure you're using a valid token from your account.", ephemeral=True)
-    
+        await interaction.followup.send(
+            "❌ User account not found. Please make sure you're using a valid token from your account.", ephemeral=True
+        )
     except InvalidTokenError as e:
         logging.warning(f"Invalid token: {e}")
-        await interaction.followup.send("❌ Invalid or expired token. Please generate a new token from the web dashboard.", ephemeral=True)
-    
+        await interaction.followup.send(
+            "❌ Invalid or expired token. Please generate a new token from the web dashboard.", ephemeral=True
+        )
     except DatabaseError as e:
         logging.error(f"Database error during authentication: {e}")
         await interaction.followup.send("❌ Database connection error. Please try again later.", ephemeral=True)
