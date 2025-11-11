@@ -11,3 +11,4 @@ ENV/
 .venv/
 env.bak/
 venv.bak/
+*/copilot-instructions.md

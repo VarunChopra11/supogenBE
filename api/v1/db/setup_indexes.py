@@ -30,6 +30,20 @@ async def setup_ttl_indexes():
         [("thread_id", 1), ("user_id", 1)],
         name="discord_thread_user_idx",
     )
+    
+    # Index for resolution status queries
+    await db["discord_chats"].create_index(
+        [("is_resolved", 1), ("updated_at", 1)],
+        name="discord_resolution_updated_idx",
+    )
+    
+    # Compound index for efficient auto-resolve queries
+    await db["discord_chats"].create_index(
+        [("is_resolved", 1), ("updated_at", 1), ("user_id", 1)],
+        name="discord_auto_resolve_idx",
+    )
+
+    print("✅ All indexes created successfully")
 
 
 # async def setup_vector_index():

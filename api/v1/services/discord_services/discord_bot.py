@@ -195,10 +195,52 @@ async def on_reaction_add(reaction, user):
     if message.author.id != bot.user.id:
         return  # Only track reactions on bot's own messages
 
+    # Determine the thread_id based on the channel type
+    thread_id = None
+    if isinstance(message.channel, discord.Thread):
+        thread_id = str(message.channel.id)
+    elif message.reference and message.reference.message_id:
+        # If this is a reply, there might be a thread created
+        try:
+            # Try to find if a thread was created from the referenced message
+            original_message = await message.channel.fetch_message(message.reference.message_id)
+            if hasattr(original_message, 'thread') and original_message.thread:
+                thread_id = str(original_message.thread.id)
+        except Exception:
+            pass
+
+    # Handle resolution status based on reaction
     if str(reaction.emoji) == "👍":
-        await message.channel.send(f"✅ Glad it helped, {user.mention}!")
+        if thread_id:
+            try:
+                from api.v1.services.chats import chat_service
+                success = await chat_service.mark_discord_chat_resolved(thread_id=thread_id, is_resolved=True)
+                if success:
+                    logging.info(f"✅ Marked thread {thread_id} as resolved (thumbs up)")
+                    await message.channel.send(f"✅ Glad it helped, {user.mention}! This query has been marked as resolved.")
+                else:
+                    await message.channel.send(f"✅ Glad it helped, {user.mention}!")
+            except Exception as e:
+                logging.error(f"Error marking chat as resolved: {e}", exc_info=True)
+                await message.channel.send(f"✅ Glad it helped, {user.mention}!")
+        else:
+            await message.channel.send(f"✅ Glad it helped, {user.mention}!")
+            
     elif str(reaction.emoji) == "👎":
-        await message.channel.send(f"❌ Sorry it didn't help, {user.mention}. We'll try to improve!")
+        if thread_id:
+            try:
+                from api.v1.services.chats import chat_service
+                success = await chat_service.mark_discord_chat_resolved(thread_id=thread_id, is_resolved=False)
+                if success:
+                    logging.info(f"❌ Marked thread {thread_id} as pending (thumbs down)")
+                    await message.channel.send(f"❌ Sorry it didn't help, {user.mention}. We'll try to improve! This query has been marked as pending.")
+                else:
+                    await message.channel.send(f"❌ Sorry it didn't help, {user.mention}. We'll try to improve!")
+            except Exception as e:
+                logging.error(f"Error marking chat as pending: {e}", exc_info=True)
+                await message.channel.send(f"❌ Sorry it didn't help, {user.mention}. We'll try to improve!")
+        else:
+            await message.channel.send(f"❌ Sorry it didn't help, {user.mention}. We'll try to improve!")
 
 
 # --- /Authenticate Command for Bot-Server Mapping ---

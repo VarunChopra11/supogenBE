@@ -3,10 +3,12 @@ from api.v1.routers.auth_routers import auth
 from api.v1.routers.auth_routers import discord
 from api.v1.routers.documents import router as documents_router
 from api.v1.routers.chat import router as chat_router
+from api.v1.routers.analytics import router as analytics_router
 from fastapi.middleware.cors import CORSMiddleware
 from api.v1.db.init_db import init_db, close_db
 from contextlib import asynccontextmanager
 from api.v1.services.discord_services.discord_bot import run_discord_bot_async
+from api.v1.tasks import start_auto_resolve_task
 from dotenv import load_dotenv
 import asyncio
 import uvicorn
@@ -17,6 +19,8 @@ load_dotenv(override=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Start the auto-resolve background task
+    await start_auto_resolve_task()
     yield
     await close_db()
 
@@ -40,6 +44,7 @@ app.include_router(auth.router, tags=["auth"])
 app.include_router(discord.router)
 app.include_router(chat_router, tags=["chat"])
 app.include_router(documents_router, prefix="/documents", tags=["documents"])
+app.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 
 
 @app.get("/wakeup")
