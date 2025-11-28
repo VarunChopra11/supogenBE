@@ -184,7 +184,7 @@ async def chat(
 	)
 
 
-@router.get("/chat/{chat_id}", response_model=PlaygroundChat)
+@router.get("/{chat_id}", response_model=PlaygroundChat)
 async def get_chat(
 	chat_id: str,
 	user=Depends(auth_service.get_current_user),

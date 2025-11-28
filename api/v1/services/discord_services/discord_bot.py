@@ -1,7 +1,7 @@
 import logging
 import discord
 from discord.ext import commands
-from discord import app_commands
+from discord import app_commands, ChannelType
 from dotenv import load_dotenv
 import os
 
@@ -16,7 +16,7 @@ from api.v1.services.discord_services.discord import (
     AuthenticationError,
     send_message,
 )
-
+from api.v1.services.discord_services.discord import refresh_forums_list, remove_forum_from_selected
 from api.v1.db.session import DatabaseSession
 
 load_dotenv(override=True)
@@ -243,6 +243,70 @@ async def on_reaction_add(reaction, user):
             await message.channel.send(f"❌ Sorry it didn't help, {user.mention}. We'll try to improve!")
 
 
+@bot.event
+async def on_guild_channel_create(channel):
+    """
+    Handle channel creation events. Refreshes the forums list when a forum channel is created.
+    """
+    try:
+        # Only process if it's a forum channel
+        if channel.type != ChannelType.forum:
+            return
+        
+        guild = channel.guild
+        if not guild:
+            return
+        
+        server_id = str(guild.id)
+        
+        # Refresh the complete forums list
+        success = await refresh_forums_list(server_id, guild)
+        
+        if success:
+            logging.info(f"✅ Refreshed forums list for server {server_id} after channel creation: {channel.name}")
+        else:
+            logging.warning(f"⚠️ Failed to refresh forums list for server {server_id}")
+            
+    except Exception as e:
+        logging.error(f"Error handling channel creation: {e}", exc_info=True)
+
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    """
+    Handle channel deletion events. Refreshes the forums list and removes the forum 
+    from selected_forums if it was a forum channel.
+    """
+    try:
+        # Only process if it's a forum channel
+        if channel.type != ChannelType.forum:
+            return
+        
+        guild = channel.guild
+        if not guild:
+            return
+        
+        server_id = str(guild.id)
+        forum_id = str(channel.id)
+        
+        # Refresh the complete forums list
+        refresh_success = await refresh_forums_list(server_id, guild)
+        
+        # Remove from selected_forums if present
+        remove_success = await remove_forum_from_selected(server_id, forum_id)
+        
+        if refresh_success:
+            logging.info(f"✅ Refreshed forums list for server {server_id} after channel deletion: {channel.name}")
+        else:
+            logging.warning(f"⚠️ Failed to refresh forums list for server {server_id}")
+            
+        if remove_success:
+            logging.info(f"✅ Removed forum {forum_id} from selected_forums for server {server_id}")
+            
+    except Exception as e:
+        logging.error(f"Error handling channel deletion: {e}", exc_info=True)
+
+
 # --- /Authenticate Command for Bot-Server Mapping ---
 @bot.tree.command(name="authenticate", description="Authenticate server to bot")
 @app_commands.describe(token="Your JWT token")
@@ -258,6 +322,14 @@ async def authenticate(interaction: discord.Interaction, token: str):
     bot_member = guild.me
     owner = guild.owner or await bot.fetch_user(guild.owner_id)
 
+    forums = []
+    for channel in guild.channels:
+        if channel.type == ChannelType.forum:
+            forums.append({
+                "forum_id": str(channel.id),
+                "forum_name": channel.name,
+            })
+
     auth_data = {
         "token": token,
         "server_id": str(guild.id),
@@ -265,6 +337,8 @@ async def authenticate(interaction: discord.Interaction, token: str):
         "owner_id": str(owner.id),
         "owner_username": owner.name,
         "member_count": guild.member_count,
+        "forums": forums,
+        "selected_forums": [],
         "bot_permissions": {
             "permissions_value": interaction.app_permissions.value if interaction.app_permissions else None,
             "is_authenticated": False,  # Will be set to True upon successful authentication

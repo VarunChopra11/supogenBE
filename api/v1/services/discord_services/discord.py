@@ -123,6 +123,8 @@ async def authenticate_server(auth_data: dict) -> bool:
             "owner_id": auth_data.get("owner_id"),
             "owner_username": auth_data.get("owner_username"),
             "member_count": auth_data.get("member_count"),
+            "forums": auth_data.get("forums", []),
+            "selected_forums": auth_data.get("selected_forums", []),
             "bot_permissions": {
                 "permissions_value": auth_data.get("bot_permissions", {}).get("permissions_value"),
                 "is_authenticated": True,  # Set to True since we're authenticating
@@ -210,13 +212,137 @@ async def get_user_servers(user_id: str) -> list:
             
         servers = await db["discord_servers"].find(
             {"user_id": str(user_id)},
-            {"_id": 0, "server_id": 1, "server_name": 1, "member_count": 1}
+            {"_id": 0, "server_id": 1, "server_name": 1, "member_count": 1, "forums": 1, "selected_forums": 1}
         ).to_list(length=None)
         
         return servers
     except Exception as e:
         logger.error(f"Error getting user servers: {e}")
         return []
+
+
+async def update_selected_forums(user_id: str, server_id: str, selected_forums: list) -> bool:
+    """
+    Update the selected_forums list for a specific server.
+    
+    Args:
+        user_id: The user ID who owns the server registration
+        server_id: The Discord server ID to update
+        selected_forums: List of forum dictionaries with forum_id and forum_name
+        
+    Returns:
+        bool: True if update successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+            
+        # Update the selected_forums field for the server
+        result = await db["discord_servers"].update_one(
+            {"user_id": str(user_id), "server_id": str(server_id)},
+            {"$set": {
+                "selected_forums": selected_forums,
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for user_id={user_id}, server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully updated selected_forums for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating selected forums: {e}")
+        return False
+
+
+async def refresh_forums_list(server_id: str, guild) -> bool:
+    """
+    Refresh the complete forums list for a server by querying all forum channels.
+    
+    Args:
+        server_id: The Discord server ID
+        guild: The Discord guild object
+        
+    Returns:
+        bool: True if update successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+        
+        # Collect all current forum channels
+        forums = []
+        for channel in guild.channels:
+            if str(channel.type) == "forum":  # ChannelType.forum
+                forums.append({
+                    "forum_id": str(channel.id),
+                    "forum_name": channel.name,
+                })
+        
+        # Update the forums list in the database
+        result = await db["discord_servers"].update_one(
+            {"server_id": str(server_id)},
+            {"$set": {
+                "forums": forums,
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully refreshed forums list for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error refreshing forums list: {e}")
+        return False
+
+
+async def remove_forum_from_selected(server_id: str, forum_id: str) -> bool:
+    """
+    Remove a specific forum from the selected_forums list.
+    
+    Args:
+        server_id: The Discord server ID
+        forum_id: The forum channel ID to remove
+        
+    Returns:
+        bool: True if update successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+        
+        # Pull the forum from selected_forums array
+        result = await db["discord_servers"].update_one(
+            {"server_id": str(server_id)},
+            {
+                "$pull": {"selected_forums": {"forum_id": str(forum_id)}},
+                "$set": {"updated_at": datetime.now(timezone.utc)}
+            }
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully removed forum {forum_id} from selected_forums for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error removing forum from selected_forums: {e}")
+        return False
     
 async def send_message(
     messages, 

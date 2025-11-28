@@ -1,6 +1,7 @@
 from fastapi import FastAPI
-from api.v1.routers.auth_routers import auth
-from api.v1.routers.auth_routers import discord
+from api.v1.routers.auth_routers.auth import router as auth_router
+from api.v1.routers.auth_routers.discord import router as discord_auth_router
+from api.v1.routers.discord import router as discord_router
 from api.v1.routers.documents import router as documents_router
 from api.v1.routers.chat import router as chat_router
 from api.v1.routers.analytics import router as analytics_router
@@ -40,9 +41,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, tags=["auth"])
-app.include_router(discord.router)
-app.include_router(chat_router, tags=["chat"])
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(discord_auth_router, prefix="/auth/discord", tags=["auth", "discord"])
+app.include_router(discord_router, prefix="/discord", tags=["discord"])
+app.include_router(chat_router, prefix="/chat", tags=["chat"])
 app.include_router(documents_router, prefix="/documents", tags=["documents"])
 app.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 
