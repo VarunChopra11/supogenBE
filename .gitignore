@@ -1,5 +1,5 @@
 .env
-bin.py
+git_ignored/
 *__pycache__/
 *.pyc
 *.pyo

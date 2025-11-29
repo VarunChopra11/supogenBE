@@ -46,6 +46,63 @@ async def setup_ttl_indexes():
     print("✅ All indexes created successfully")
 
 
+async def setup_discord_context_index():
+    db = DatabaseSession.get_db()
+    collection_name = "discord_context_chunks"
+    index_name = "discord_context_vector_index"
+
+    # 1. Ensure collection exists (required for Vector Search index creation)
+    existing_collections = await db.list_collection_names()
+    if collection_name not in existing_collections:
+        await db.create_collection(collection_name)
+        print(f"✅ Collection '{collection_name}' created.")
+
+    # 2. Check if index exists to avoid re-creation errors
+    try:
+        # Note: listSearchIndexes works for both types, but vectorSearch indexes 
+        # return 'type': 'vectorSearch' in the info.
+        cursor = db[collection_name].list_search_indexes(index_name)
+        # In motor, list_search_indexes returns a cursor
+        async for index in cursor:
+            if index.get("name") == index_name:
+                print(f"✅ Vector index '{index_name}' already exists.")
+                return
+    except Exception as e:
+        # If the command fails or index doesn't exist, proceed to create
+        pass
+
+    # 3. Define the Atlas Vector Search Index
+    # NOTE: distinct 'type': 'vectorSearch' and simpler 'fields' structure
+    index_model = {
+        "name": index_name,
+        "type": "vectorSearch", 
+        "definition": {
+            "fields": [
+                {
+                    "type": "vector",
+                    "path": "embedding",
+                    "numDimensions": 1536,
+                    "similarity": "cosine"
+                },
+                {
+                    "type": "filter",
+                    "path": "server_id"
+                }
+            ]
+        }
+    }
+
+    # 4. Create the index
+    print(f"⏳ Creating vector index '{index_name}'...")
+    try:
+        await db.command({
+            "createSearchIndexes": collection_name,
+            "indexes": [index_model]
+        })
+        print(f"✅ Vector search index '{index_name}' creation initiated.")
+    except Exception as e:
+        print(f"❌ Failed to create vector index: {e}")
+
 # async def setup_vector_index():
 #     """Ensure vector search index exists for document chunks."""
 #     db = DatabaseSession.get_db()
