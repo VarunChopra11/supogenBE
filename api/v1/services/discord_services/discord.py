@@ -1,4 +1,12 @@
 from api.v1.utils.crypto import fernet_decrypt
+from api.v1.utils.exceptions import (
+    AuthenticationError,
+    ServerAlreadyRegisteredError,
+    TokenAlreadyUsedError,
+    UserNotFoundError,
+    InvalidTokenError,
+    DatabaseError,
+)
 from typing import AsyncGenerator, Optional
 import jwt
 from api.v1.config import auth_config
@@ -15,36 +23,6 @@ from api.v1.services.chats import chat_service
 from api.v1.schemas.chats import ChatMessage
 
 logger = logging.getLogger(__name__)
-
-
-class AuthenticationError(Exception):
-    """Base exception for authentication errors"""
-    pass
-
-
-class ServerAlreadyRegisteredError(AuthenticationError):
-    """Raised when server is already registered with the bot"""
-    pass
-
-
-class TokenAlreadyUsedError(AuthenticationError):
-    """Raised when JWT token has already been used"""
-    pass
-
-
-class UserNotFoundError(AuthenticationError):
-    """Raised when user is not found in database"""
-    pass
-
-
-class InvalidTokenError(AuthenticationError):
-    """Raised when JWT token is invalid or expired"""
-    pass
-
-
-class DatabaseError(AuthenticationError):
-    """Raised when there's a database connection issue"""
-    pass
 
 
 async def authenticate_server(auth_data: dict) -> bool:

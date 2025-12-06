@@ -64,7 +64,7 @@ async def setup_discord_context_index():
             if index.get("name") == index_name:
                 print(f"✅ Vector index '{index_name}' already exists.")
                 return
-    except Exception as e:
+    except Exception:
         # If the command fails or index doesn't exist, proceed to create
         pass
 

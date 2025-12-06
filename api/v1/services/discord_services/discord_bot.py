@@ -6,17 +6,20 @@ from dotenv import load_dotenv
 import os
 
 import asyncio
-from api.v1.services.discord_services.discord import (
-    authenticate_server, 
+from api.v1.utils.exceptions import (
+    AuthenticationError,
     ServerAlreadyRegisteredError,
     TokenAlreadyUsedError,
     UserNotFoundError,
     InvalidTokenError,
     DatabaseError,
-    AuthenticationError,
-    send_message,
 )
-from api.v1.services.discord_services.discord import refresh_forums_list, remove_forum_from_selected
+from api.v1.services.discord_services.discord import (
+    authenticate_server,
+    send_message,
+    refresh_forums_list,
+    remove_forum_from_selected,
+)
 from api.v1.db.session import DatabaseSession
 
 load_dotenv(override=True)
@@ -31,44 +34,6 @@ intents.guilds = True
 intents.reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-def message_to_dict(message: discord.Message):
-    return {
-        "id": message.id,
-        "content": message.content,
-        "created_at": message.created_at.isoformat(),
-        "channel": {
-            "id": message.channel.id,
-            "name": getattr(message.channel, "name", None),
-            "type": str(message.channel.type),
-        },
-        "author": {
-            "id": message.author.id,
-            "name": message.author.name,
-            "global_name": getattr(message.author, "global_name", None),
-            "display_name": message.author.display_name,
-            "bot": message.author.bot,
-        },
-        "guild": {
-            "id": message.guild.id if message.guild else None,
-            "name": message.guild.name if message.guild else None,
-            "member_count": message.guild.member_count if message.guild else None,
-        } if message.guild else None,
-        "attachments": [
-            {
-                "id": a.id,
-                "filename": a.filename,
-                "size": a.size,
-                "url": a.url,
-                "content_type": a.content_type,
-            }
-            for a in message.attachments
-        ],
-        "mentions": [m.id for m in message.mentions],
-        "role_mentions": [r.id for r in message.role_mentions],
-        "type": str(message.type),
-        "flags": message.flags.value,
-    }
 
 @bot.event
 async def on_ready():

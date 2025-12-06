@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 import logging
 
 from api.v1.services.auth_services.auth import AuthService
-from api.v1.services.chats import chat_service
+from api.v1.services.analytics import analytics_service
 
 router = APIRouter()
 auth_service = AuthService()
@@ -23,7 +23,7 @@ async def get_discord_analytics(
     """
     try:
         user_id = user["user_id"]
-        analytics = await chat_service.get_discord_analytics(user_id)
+        analytics = await analytics_service.get_discord_analytics(user_id)
         
         return {"data": analytics}
         
@@ -54,7 +54,7 @@ async def get_resolved_chats(
     """
     try:
         user_id = user["user_id"]
-        result = await chat_service.get_resolved_discord_chats(
+        result = await analytics_service.get_resolved_discord_chats(
             user_id=user_id,
             page=page,
             page_size=page_size
@@ -89,7 +89,7 @@ async def get_unresolved_chats(
     """
     try:
         user_id = user["user_id"]
-        result = await chat_service.get_unresolved_discord_chats(
+        result = await analytics_service.get_unresolved_discord_chats(
             user_id=user_id,
             page=page,
             page_size=page_size

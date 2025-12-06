@@ -23,7 +23,6 @@ class DiscordChat(BaseModel):
     chat_id: str
     user_id: str
     server_id: str
-    # Optional Discord specific metadata (channel/thread, etc.)
     channel_id: Optional[str] = None
     thread_id: Optional[str] = None
     messages: List[ChatMessage] = Field(default_factory=list)
