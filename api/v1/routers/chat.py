@@ -1,18 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from typing import AsyncGenerator, Set, List
-import json
+from typing import List
 import logging
 
 from api.v1.services.auth_services.auth import AuthService
 from api.v1.utils.csrf import csrf_verification
-from api.v1.services.embed import (
-	generate_text_embedding,
-	search_similar_docs,
-	get_openai_chat_completion_with_history,
-)
 from api.v1.services.chats import chat_service
-from api.v1.schemas.chats import PlaygroundChat, ChatMessage, ChatRequest
+from api.v1.schemas.chats import PlaygroundChat, ChatRequest
 
 router = APIRouter()
 auth_service = AuthService()
@@ -40,136 +34,14 @@ async def chat(
 
 	user_id = user["user_id"]
 	
-	# Storage for collecting the complete assistant response
-	collected_response = []
-	final_chat_id = req.chat_id
-	
-	async def event_stream() -> AsyncGenerator[str, None]:
-		nonlocal collected_response, final_chat_id
-		
-		try:
-			# 1) Get or create chat
-			existing_chat = None
-			if final_chat_id:
-				existing_chat = await chat_service.get_playground_chat_by_id(
-					chat_id=final_chat_id, user_id=user_id
-				)
-				if not existing_chat:
-					raise HTTPException(
-						status_code=status.HTTP_404_NOT_FOUND,
-						detail=f"Chat {final_chat_id} not found or unauthorized",
-					)
-				# Validate server_id matches
-				if existing_chat.server_id != req.server_id:
-					raise HTTPException(
-						status_code=status.HTTP_400_BAD_REQUEST,
-						detail="server_id mismatch with existing chat",
-					)
-			
-			# 2) Embed the query
-			query_embedding = await generate_text_embedding(req.query)
-
-			# 3) Vector search scoped by user and server (with similarity threshold)
-			top_docs = await search_similar_docs(
-				query_embedding=query_embedding,
-				user_id=user_id,
-				server_id=req.server_id,
-				top_k=req.top_k,
-			)
-
-			sources: Set[str] = {d.get("doc_url") for d in top_docs if d.get("doc_url")}
-
-			# Stream sources first so client can render citations early
-			yield "event: sources\n" + f"data: {json.dumps(list(sources))}\n\n"
-
-			# 4) Build context from retrieved documents
-			if not top_docs:
-				context = "No sufficiently relevant context found in the knowledge base."
-				logger.info(f"No documents met similarity threshold for query: {req.query[:50]}...")
-			else:
-				context = "\n\n".join([d.get("text", "") for d in top_docs])
-				logger.info(f"Retrieved {len(top_docs)} documents with scores: {[d.get('score', 0) for d in top_docs]}")
-
-			# 5) Build messages array with complete history
-			messages = []
-			
-			# System message with context
-			system_prompt = (
-				"You are a helpful AI assistant specialized in explaining SaaS API documentation. "
-				"Use the context below to answer the user's question as precisely as possible. "
-				"If the answer isn't explicitly in the context, say \"I couldn't find that information.\"\n\n"
-				f"### Context:\n{context}"
-			)
-			messages.append({"role": "system", "content": system_prompt})
-			
-			# Add conversation history if continuing a chat
-			if existing_chat and existing_chat.messages:
-				for msg in existing_chat.messages:
-					messages.append({
-						"role": msg.role,
-						"content": msg.content
-					})
-			
-			# Add current user query
-			messages.append({"role": "user", "content": req.query})
-
-			# 6) Stream model output with full context
-			async for delta in get_openai_chat_completion_with_history(messages):
-				collected_response.append(delta)
-				# Send as SSE data frames
-				yield f"data: {json.dumps(delta)}\n\n"
-
-			# 7) Create chat_id if new conversation
-			if not final_chat_id:
-				final_chat_id = await chat_service.create_playground_chat(
-					user_id=user_id,
-					server_id=req.server_id,
-				)
-			
-			# Send the chat_id to the client
-			yield "event: chat_id\n" + f"data: {json.dumps({'chat_id': final_chat_id})}\n\n"
-			
-			# Indicate completion
-			yield "event: done\ndata: null\n\n"
-
-		except HTTPException:
-			raise
-		except Exception as e:
-			logger.error(f"Chat streaming error: {str(e)}", exc_info=True)
-			# Surface the error to the client as an SSE error event
-			yield "event: error\n" + f"data: {json.dumps({'message': 'Internal server error'})}\n\n"
-		
-		finally:
-			# 8) Store messages in database after streaming completes
-			if final_chat_id and collected_response:
-				try:
-					complete_response = "".join(collected_response)
-					
-					# Store user message
-					user_msg = ChatMessage(role="user", content=req.query)
-					await chat_service.append_playground_message(
-						chat_id=final_chat_id, message=user_msg
-					)
-					
-					# Store assistant response with sources
-					assistant_msg = ChatMessage(
-						role="assistant",
-						content=complete_response,
-						sources=list(sources) if sources else None
-					)
-					await chat_service.append_playground_message(
-						chat_id=final_chat_id, message=assistant_msg
-					)
-					
-					logger.info(f"Successfully stored messages for chat {final_chat_id}")
-				except Exception as e:
-					logger.error(
-						f"Failed to store chat messages for {final_chat_id}: {str(e)}", 
-						exc_info=True
-					)
-
 	return StreamingResponse(
-		event_stream(),
+		chat_service.handle_playground_chat_stream(
+			query=req.query,
+			user_id=user_id,
+			server_id=req.server_id,
+			chat_id=req.chat_id,
+			top_k=req.top_k,
+		),
 		media_type="text/event-stream",
 		headers={
 			# Helpful for proxies
