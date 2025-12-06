@@ -1,6 +1,8 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, Field
 from typing import List, Optional
 from uuid import UUID
+import uuid
+from datetime import datetime, timezone
 from bson import ObjectId
 
 
@@ -55,3 +57,14 @@ class MarkdownProcessResponse(BaseModel):
     success: bool
     message: str
     chunks_created: int
+
+
+class DiscordChatChunk(BaseModel):
+    chunk_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    thread_id: str
+    server_id: str
+    channel_name: str
+    transcript: str  # The actual conversation text
+    summary: Optional[str] = None # Optional: Use LLM to summarize the solution before embedding
+    embedding: List[float]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

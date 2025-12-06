@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from typing import AsyncGenerator, Set, List, Optional
+from typing import AsyncGenerator, Set, List
 import json
 import logging
 
@@ -13,18 +12,11 @@ from api.v1.services.embed import (
 	get_openai_chat_completion_with_history,
 )
 from api.v1.services.chats import chat_service
-from api.v1.schemas.chats import PlaygroundChat, ChatMessage
+from api.v1.schemas.chats import PlaygroundChat, ChatMessage, ChatRequest
 
 router = APIRouter()
 auth_service = AuthService()
 logger = logging.getLogger(__name__)
-
-
-class ChatRequest(BaseModel):
-	query: str = Field(..., description="User question to answer")
-	server_id: str = Field(..., description="Server scope for RAG search")
-	chat_id: Optional[str] = Field(None, description="Chat ID to continue existing conversation")
-	top_k: int = Field(4, ge=1, le=20, description="Number of chunks to retrieve")
 
 
 @router.post("/chat")
@@ -77,7 +69,7 @@ async def chat(
 			# 2) Embed the query
 			query_embedding = await generate_text_embedding(req.query)
 
-			# 3) Vector search scoped by user and server
+			# 3) Vector search scoped by user and server (with similarity threshold)
 			top_docs = await search_similar_docs(
 				query_embedding=query_embedding,
 				user_id=user_id,
@@ -91,9 +83,12 @@ async def chat(
 			yield "event: sources\n" + f"data: {json.dumps(list(sources))}\n\n"
 
 			# 4) Build context from retrieved documents
-			context = "\n\n".join([d.get("text", "") for d in top_docs])
-			if not context.strip():
-				context = "No relevant context retrieved."
+			if not top_docs:
+				context = "No sufficiently relevant context found in the knowledge base."
+				logger.info(f"No documents met similarity threshold for query: {req.query[:50]}...")
+			else:
+				context = "\n\n".join([d.get("text", "") for d in top_docs])
+				logger.info(f"Retrieved {len(top_docs)} documents with scores: {[d.get('score', 0) for d in top_docs]}")
 
 			# 5) Build messages array with complete history
 			messages = []

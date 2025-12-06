@@ -309,7 +309,7 @@ async def on_guild_channel_delete(channel):
 
 # --- /Authenticate Command for Bot-Server Mapping ---
 @bot.tree.command(name="authenticate", description="Authenticate server to bot")
-@app_commands.describe(token="Your JWT token")
+@app_commands.describe(token="Your secret token")
 async def authenticate(interaction: discord.Interaction, token: str):
     await interaction.response.defer(ephemeral=True)
     

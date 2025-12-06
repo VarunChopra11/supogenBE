@@ -388,11 +388,18 @@ async def send_message(
         # 2) Perform vector search for context
         query_embedding = await generate_text_embedding(user_query)
         top_docs = await search_similar_docs(
-            query_embedding, top_k=4, user_id=user_id, server_id=server_id
+            query_embedding, 
+            top_k=4, 
+            user_id=user_id, 
+            server_id=server_id,
         )
-        context = "\n\n".join([doc.get("text", "") for doc in top_docs])
-        if not context.strip():
-            context = "No relevant context retrieved."
+        
+        if not top_docs:
+            context = "No sufficiently relevant context found in the knowledge base."
+            logger.info(f"No documents met similarity threshold for Discord query: {user_query[:50]}...")
+        else:
+            context = "\n\n".join([doc.get("text", "") for doc in top_docs])
+            logger.info(f"Retrieved {len(top_docs)} documents with scores: {[doc.get('score', 0) for doc in top_docs]}")
         
         # Extract sources from retrieved documents
         sources = list({doc.get("doc_url") for doc in top_docs if doc.get("doc_url")})
@@ -479,9 +486,17 @@ async def send_message_stream(messages, user_id: str, server_id: str) -> AsyncGe
         user_query = messages[0]["text"]
         query_embedding = await generate_text_embedding(user_query)
         top_docs = await search_similar_docs(
-            query_embedding, top_k=4, user_id=user_id, server_id=server_id
+            query_embedding, 
+            top_k=4, 
+            user_id=user_id, 
+            server_id=server_id,
         )
-        context = "\n\n".join([doc.get("text", "") for doc in top_docs])
+        
+        if not top_docs:
+            context = "No sufficiently relevant context found in the knowledge base."
+        else:
+            context = "\n\n".join([doc.get("text", "") for doc in top_docs])
+        
         prompt = f"""
         You are a helpful AI assistant for SaaS documentation.
         Use the below context to answer the user's question clearly and accurately.

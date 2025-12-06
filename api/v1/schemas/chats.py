@@ -31,3 +31,9 @@ class DiscordChat(BaseModel):
     resolution_time: Optional[float] = Field(default=None, description="Time taken to resolve the query in seconds")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ChatRequest(BaseModel):
+	query: str = Field(..., description="User question to answer")
+	server_id: str = Field(..., description="Server scope for RAG search")
+	chat_id: Optional[str] = Field(None, description="Chat ID to continue existing conversation")
+	top_k: int = Field(4, ge=1, le=20, description="Number of chunks to retrieve")

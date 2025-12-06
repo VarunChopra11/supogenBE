@@ -122,10 +122,11 @@ async def search_similar_docs(
     user_id: str,
     server_id: str,
     top_k: int = 4,
+    min_score: Optional[float] = 0.7,
 ) -> List[Dict[str, Any]]:
     """
     Perform MongoDB Atlas vector search for similar documents using Motor's async cursor.
-    Returns a list of result documents filtered by user_id and server_id.
+    Returns a list of result documents filtered by user_id, server_id, and similarity score.
     """
     if not query_embedding or not isinstance(query_embedding, list):
         raise ValueError("Query embedding must be a non-empty list of floats")
@@ -136,12 +137,21 @@ async def search_similar_docs(
                 "index": "chunks_vector_index",
                 "path": "embedding",
                 "queryVector": query_embedding,
-                "limit": top_k,            # required by Atlas
-                "numCandidates": 100,      # tune as needed
+                "limit": top_k,
+                "numCandidates": 100,
                 "filter": {
                     "user_id": user_id,
                     "server_id": server_id
                 }
+            }
+        },
+        {
+            "$project": {
+                "text": 1,
+                "doc_url": 1,
+                "user_id": 1,
+                "server_id": 1,
+                "score": {"$meta": "vectorSearchScore"}
             }
         }
     ]
@@ -151,4 +161,8 @@ async def search_similar_docs(
 
     cursor = db["embedded_documents"].aggregate(pipeline)
     docs_list = await cursor.to_list(length=top_k)
-    return docs_list
+    
+    # Filter documents by minimum similarity score
+    filtered_docs = [doc for doc in docs_list if doc.get("score", 0) >= min_score]
+    
+    return filtered_docs

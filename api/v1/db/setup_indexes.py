@@ -59,10 +59,7 @@ async def setup_discord_context_index():
 
     # 2. Check if index exists to avoid re-creation errors
     try:
-        # Note: listSearchIndexes works for both types, but vectorSearch indexes 
-        # return 'type': 'vectorSearch' in the info.
         cursor = db[collection_name].list_search_indexes(index_name)
-        # In motor, list_search_indexes returns a cursor
         async for index in cursor:
             if index.get("name") == index_name:
                 print(f"✅ Vector index '{index_name}' already exists.")
@@ -72,7 +69,6 @@ async def setup_discord_context_index():
         pass
 
     # 3. Define the Atlas Vector Search Index
-    # NOTE: distinct 'type': 'vectorSearch' and simpler 'fields' structure
     index_model = {
         "name": index_name,
         "type": "vectorSearch", 
@@ -103,51 +99,60 @@ async def setup_discord_context_index():
     except Exception as e:
         print(f"❌ Failed to create vector index: {e}")
 
-# async def setup_vector_index():
-#     """Ensure vector search index exists for document chunks."""
-#     db = DatabaseSession.get_db()
-#     collection = db["embedded_documents"]  # replace with your actual collection name
 
-#     index_name = "chunks_vector_index"
+async def setup_vector_index():
+    """Ensure vector search index exists for document chunks."""
+    db = DatabaseSession.get_db()
+    collection_name = "embedded_documents"
+    index_name = "chunks_vector_index"
 
-#     # Definition must be wrapped under `definition` for createSearchIndexes
-#     index_def = {
-#         "name": index_name,
-#         "definition": {
-#             "mappings": {
-#                 "dynamic": True,
-#                 "fields": {
-#                     "embedding": {
-#                         "type": "knnVector",
-#                         "dimensions": 1536,
-#                         "similarity": "cosine",
-#                     },
-#                     "server_id": {"type": "string"},
-#                     "user_id": {"type": "string"},
-#                     "created_at": {"type": "date"},
-#                 },
-#             }
-#         }
-#     }
+    # 1. Ensure collection exists
+    existing_collections = await db.list_collection_names()
+    if collection_name not in existing_collections:
+        await db.create_collection(collection_name)
+        print(f"✅ Collection '{collection_name}' created.")
 
-#     # Best-effort: skip creation if index already exists (supported on MongoDB 7+/Atlas)
-#     try:
-#         existing = await db.command({
-#             "listSearchIndexes": collection.name,
-#             "name": index_name,
-#         })
-#         first_batch = existing.get("cursor", {}).get("firstBatch", [])
-#         if any(ix.get("name") == index_name for ix in first_batch):
-#             print("✅ Vector search index already exists on chunks.embedding")
-#             return
-#     except Exception:
-#         # If command unsupported, proceed to attempt creation
-#         pass
+    # 2. Check if index exists
+    try:
+        cursor = db[collection_name].list_search_indexes(index_name)
+        async for index in cursor:
+            if index.get("name") == index_name:
+                print(f"✅ Vector index '{index_name}' already exists on {collection_name}.")
+                return
+    except Exception:
+        pass
 
-#     # Create or update the search index definition
-#     await db.command({
-#         "createSearchIndexes": collection.name,
-#         "indexes": [index_def],
-#     })
+    # 3. Define the Atlas Vector Search Index
+    index_model = {
+        "name": index_name,
+        "type": "vectorSearch",
+        "definition": {
+            "fields": [
+                {
+                    "numDimensions": 1536,
+                    "path": "embedding",
+                    "similarity": "cosine",
+                    "type": "vector"
+                },
+                {
+                    "path": "user_id",
+                    "type": "filter"
+                },
+                {
+                    "path": "server_id",
+                    "type": "filter"
+                }
+            ]
+        }
+    }
 
-#     print("✅ Vector search index ensured on chunks.embedding (1536-d cosine)")
+    # 4. Create the index
+    print(f"⏳ Creating vector index '{index_name}'...")
+    try:
+        await db.command({
+            "createSearchIndexes": collection_name,
+            "indexes": [index_model]
+        })
+        print(f"✅ Vector search index '{index_name}' creation initiated.")
+    except Exception as e:
+        print(f"❌ Failed to create vector index '{index_name}': {e}")
