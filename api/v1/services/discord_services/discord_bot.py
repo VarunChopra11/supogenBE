@@ -18,6 +18,7 @@ from api.v1.services.discord_services.discord import (
 )
 
 from api.v1.db.session import DatabaseSession
+from .tagging import get_tags_discord , apply_tags , ApplyModel
 
 load_dotenv(override=True)
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -82,7 +83,6 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    
     if message.author.bot:
         return
 
@@ -102,6 +102,7 @@ async def on_message(message: discord.Message):
         db = DatabaseSession.get_db()
 
         server_id = str(message.guild.id) if message.guild else None
+        
 
         # Search server for user_id
         server = await db["discord_servers"].find_one({"server_id": server_id}) if server_id else None
@@ -242,6 +243,63 @@ async def on_reaction_add(reaction, user):
         else:
             await message.channel.send(f"❌ Sorry it didn't help, {user.mention}. We'll try to improve!")
 
+@bot.event
+async def on_guild_channel_update(before, after):
+    db = DatabaseSession.get_db()
+
+    if not isinstance(after, discord.ForumChannel):
+        return
+
+    guild_id = after.guild.id  
+
+
+    before_tags = {t.id: t for t in before.available_tags}
+    after_tags  = {t.id: t for t in after.available_tags}
+
+    # Detect changes
+    added_ids     = list(after_tags.keys() - before_tags.keys())
+    removed_ids   = list(before_tags.keys() - after_tags.keys())
+    unchanged_ids = list(before_tags.keys() & after_tags.keys())
+
+    # Convert to id → name
+    added   = {tid: after_tags[tid].name for tid in added_ids}
+    removed = {tid: before_tags[tid].name for tid in removed_ids}
+
+   
+    forum_tags = {tag.name: tag.id for tag in after.available_tags}
+
+
+    await db["discord_servers"].update_one(
+        {"server_id": str(guild_id)},
+        {"$set": {"server_tags": forum_tags}}
+    )
+
+    print("DB Updated with:", forum_tags)
+
+@bot.event
+async def on_thread_create(thread: discord.Thread):
+
+    if not isinstance(thread.parent, discord.ForumChannel):
+        return
+
+    # fetch first message
+    first_msg = None
+    async for m in thread.history(limit=1, oldest_first=True):
+        first_msg = m
+
+    description = first_msg.content if first_msg else None
+
+    await apply_tags(ApplyModel(
+        thread_id=str(thread.id),
+        thread_title=thread.name,
+        thread_desc=description,
+        guild_id=str(thread.guild.id),
+        token=TOKEN
+    ))
+
+
+
+
 
 # --- /Authenticate Command for Bot-Server Mapping ---
 @bot.tree.command(name="authenticate", description="Authenticate server to bot")
@@ -280,6 +338,7 @@ async def authenticate(interaction: discord.Interaction, token: str):
             await interaction.followup.send(
                 "✅ Authentication successful! The bot is now linked to your Discord server.", ephemeral=True
             )
+            await get_tags_discord(guild.id , TOKEN )
         else:
             await interaction.followup.send("❌ Authentication failed due to an unknown error.", ephemeral=True)
     
