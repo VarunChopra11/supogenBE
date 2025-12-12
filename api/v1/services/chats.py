@@ -6,7 +6,7 @@ import json
 import logging
 
 from api.v1.db.session import DatabaseSession
-from api.v1.services.prompts import chat_system_prompt
+from api.v1.utils.prompts import chat_system_prompt
 from api.v1.schemas.chats import PlaygroundChat, DiscordChat, ChatMessage
 from api.v1.services.embed import (
     generate_text_embedding,

@@ -7,7 +7,7 @@ from openai import APIError, APIConnectionError, RateLimitError
 
 from api.v1.db.session import DatabaseSession
 from api.v1.schemas.chunks import DiscordChatChunk
-from api.v1.services.prompts import analyze_forum_chat_prompt
+from api.v1.utils.prompts import analyze_forum_chat_prompt
 from api.v1.services.embed import generate_text_embedding, get_openai_chat_completion_with_history
 
 logger = logging.getLogger(__name__)

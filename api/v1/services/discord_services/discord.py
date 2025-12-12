@@ -4,7 +4,7 @@ from typing import Optional
 import logging
 import jwt
 
-from api.v1.services.prompts import chat_system_prompt
+from api.v1.utils.prompts import chat_system_prompt
 from api.v1.utils.crypto import fernet_decrypt
 from api.v1.utils.exceptions import (
     AuthenticationError,
@@ -339,7 +339,7 @@ async def send_message(
     - Includes full conversation history in context
     - Stores user message and bot response after completion
     """
-    
+
     chat_id = None
     
     try:
