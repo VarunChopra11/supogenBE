@@ -1,10 +1,12 @@
 from typing import List, Optional
 from datetime import datetime, timezone
+from fastapi import HTTPException, status
 import uuid
 import json
 import logging
 
 from api.v1.db.session import DatabaseSession
+from api.v1.services.prompts import chat_system_prompt
 from api.v1.schemas.chats import PlaygroundChat, DiscordChat, ChatMessage
 from api.v1.services.embed import (
     generate_text_embedding,
@@ -84,7 +86,6 @@ class ChatService:
         - Streams OpenAI responses
         - Stores conversation history
         """
-        from fastapi import HTTPException, status
         
         collected_response = []
         final_chat_id = chat_id
@@ -137,12 +138,7 @@ class ChatService:
             messages = []
             
             # System message with context
-            system_prompt = (
-                "You are a helpful AI assistant specialized in explaining SaaS API documentation. "
-                "Use the context below to answer the user's question as precisely as possible. "
-                "If the answer isn't explicitly in the context, say \"I couldn't find that information.\"\n\n"
-                f"### Context:\n{context}"
-            )
+            system_prompt = chat_system_prompt + f"### Context:\n{context}"
             messages.append({"role": "system", "content": system_prompt})
             
             # Add conversation history if continuing a chat

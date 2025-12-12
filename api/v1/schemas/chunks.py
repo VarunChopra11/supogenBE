@@ -64,7 +64,7 @@ class DiscordChatChunk(BaseModel):
     thread_id: str
     server_id: str
     channel_name: str
-    transcript: str  # The actual conversation text
-    summary: Optional[str] = None # Optional: Use LLM to summarize the solution before embedding
+    thread_name: str
+    summary: str 
     embedding: List[float]
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

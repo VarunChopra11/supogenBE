@@ -1,3 +1,10 @@
+from discord import ChannelType, Thread
+from datetime import datetime, timezone
+from typing import Optional
+import logging
+import jwt
+
+from api.v1.services.prompts import chat_system_prompt
 from api.v1.utils.crypto import fernet_decrypt
 from api.v1.utils.exceptions import (
     AuthenticationError,
@@ -7,13 +14,8 @@ from api.v1.utils.exceptions import (
     InvalidTokenError,
     DatabaseError,
 )
-from typing import Optional
-import jwt
 from api.v1.config import auth_config
 from api.v1.db.session import DatabaseSession
-from discord import ChannelType, Thread
-from datetime import datetime, timezone
-import logging
 from api.v1.services.embed import (
     generate_text_embedding,
     search_similar_docs,
@@ -336,18 +338,8 @@ async def send_message(
     - Creates new chat if thread is new
     - Includes full conversation history in context
     - Stores user message and bot response after completion
-    
-    Args:
-        messages: List like [{"type": "text", "text": "your question"}]
-        user_id: The user's ID to scope search
-        server_id: The Discord server ID to scope search
-        thread_id: Discord thread ID for conversation tracking
-        channel_id: Discord channel ID
-        
-    Returns:
-        str: The complete bot response
     """
-    collected_response = []
+    
     chat_id = None
     
     try:
@@ -386,12 +378,7 @@ async def send_message(
         msg_array = []
         
         # System message with context
-        system_prompt = (
-            "You are a helpful AI assistant for SaaS documentation. "
-            "Use the below context to answer the user's question clearly and accurately. "
-            "If the answer isn't in the docs, say so.\n\n"
-            f"### Context:\n{context}"
-        )
+        system_prompt = chat_system_prompt + f"### Context:\n{context}"
         msg_array.append({"role": "system", "content": system_prompt})
         
         # Add conversation history if continuing a thread
@@ -406,11 +393,7 @@ async def send_message(
         # Add current user query
         msg_array.append({"role": "user", "content": user_query})
         
-        # 4) Get completion with full context
-        async for chunk in get_openai_chat_completion_with_history(msg_array):
-            collected_response.append(chunk)
-        
-        full_response = "".join(collected_response)
+        full_response = await get_openai_chat_completion_with_history(messages=msg_array, stream=False)
         
         # 5) Store chat messages
         try:
