@@ -19,6 +19,7 @@ from api.v1.services.discord_services.discord import (
     send_message,
     refresh_forums_list,
     remove_forum_from_selected,
+    track_forum_message,
 )
 from api.v1.db.session import DatabaseSession
 
@@ -51,11 +52,23 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
+    # Check if bot should respond
     if (
         bot.user not in message.mentions
         and not (message.reference and message.reference.resolved and message.reference.resolved.author.id == bot.user.id)
         and not (isinstance(message.channel, discord.Thread) and message.channel.owner_id == bot.user.id)
     ):
+        # Message doesn't need bot response, track forum message if applicable
+        try:
+            db = DatabaseSession.get_db()
+            server_id = str(message.guild.id) if message.guild else None
+            server = await db["discord_servers"].find_one({"server_id": server_id}) if server_id else None
+            
+            if server:
+                await track_forum_message(message, server, db)
+        except Exception as e:
+            logging.error(f"Error tracking forum message in non-response flow: {e}", exc_info=True)
+        
         return
 
     content = message.content.replace(f"<@{bot.user.id}>", "").strip()

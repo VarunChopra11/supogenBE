@@ -11,6 +11,7 @@ from typing import Optional
 import jwt
 from api.v1.config import auth_config
 from api.v1.db.session import DatabaseSession
+from discord import ChannelType, Thread
 from datetime import datetime, timezone
 import logging
 from api.v1.services.embed import (
@@ -445,3 +446,77 @@ async def send_message(
     except Exception as e:
         logger.error(f"Error in send_message: {e}", exc_info=True)
         return f"⚠️ Error: {e}"
+
+
+async def track_forum_message(message, server: dict, db):
+    """
+    Track messages in forum threads for selected forums.
+    
+    Args:
+        message: The Discord message object
+        server: The server document from discord_servers collection
+        db: Database connection
+    """
+    try:
+        
+        # Check if message is in a thread and if thread has a parent (forum channel)
+        if not isinstance(message.channel, Thread):
+            return
+        
+        # Get parent channel (should be a forum channel)
+        parent_channel = message.channel.parent
+        if not parent_channel or parent_channel.type != ChannelType.forum:
+            return
+        
+        # Check if this forum is in selected_forums
+        selected_forums = server.get("selected_forums", [])
+        forum_id = str(parent_channel.id)
+        
+        is_selected = any(forum.get("forum_id") == forum_id for forum in selected_forums)
+        if not is_selected:
+            return
+        
+        # Prepare message data
+        message_data = {
+            "discord_message_id": str(message.id),
+            "discord_user_id": str(message.author.id),
+            "discord_user_name": message.author.name,
+            "message": message.content,
+            "created_at": datetime.now(timezone.utc)
+        }
+        
+        thread_id = str(message.channel.id)
+        user_id = server.get("user_id")
+        server_id = server.get("server_id")
+        
+        # Check if forum_chats document exists for this thread
+        existing_chat = await db["forum_chats"].find_one({"thread_id": thread_id})
+        
+        if existing_chat:
+            # Append message to existing chat
+            await db["forum_chats"].update_one(
+                {"thread_id": thread_id},
+                {
+                    "$push": {"messages": message_data},
+                    "$set": {"updated_at": datetime.now(timezone.utc)}
+                }
+            )
+            logger.info(f"📝 Appended message to forum chat {thread_id}")
+        else:
+            # Create new forum chat document
+            forum_chat = {
+                "user_id": user_id,
+                "server_id": server_id,
+                "thread_id": thread_id,
+                "channel_id": forum_id,
+                "channel_name": parent_channel.name,
+                "thread_name": message.channel.name,
+                "messages": [message_data],
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
+            }
+            await db["forum_chats"].insert_one(forum_chat)
+            logger.info(f"✨ Created new forum chat for thread {thread_id}")
+            
+    except Exception as e:
+        logger.error(f"Error tracking forum message: {e}", exc_info=True)

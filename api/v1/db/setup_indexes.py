@@ -43,6 +43,25 @@ async def setup_ttl_indexes():
         name="discord_auto_resolve_idx",
     )
 
+    # Forum chats: efficient lookups by server, thread, and user
+    await db["forum_chats"].create_index(
+        [("server_id", 1), ("thread_id", 1)],
+        name="forum_server_thread_idx",
+    )
+    await db["forum_chats"].create_index("thread_id", unique=True, name="forum_thread_id_uidx")
+    await db["forum_chats"].create_index(
+        [("user_id", 1), ("server_id", 1), ("updated_at", -1)],
+        name="forum_user_server_updated_idx",
+    )
+    await db["forum_chats"].create_index(
+        [("channel_name", 1), ("server_id", 1)],
+        name="forum_channel_server_idx",
+    )
+    await db["forum_chats"].create_index(
+        "messages.created_at",
+        name="forum_messages_created_idx",
+    )
+
     print("✅ All indexes created successfully")
 
 

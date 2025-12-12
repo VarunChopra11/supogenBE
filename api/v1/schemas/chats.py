@@ -31,6 +31,28 @@ class DiscordChat(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class ForumMessage(BaseModel):
+    """Individual message within a forum thread."""
+    discord_message_id: str
+    discord_user_id: str
+    discord_user_name: str
+    message: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ForumChat(BaseModel):
+    """Forum thread chat document structure."""
+    user_id: str
+    server_id: str
+    thread_id: str
+    channel_id: str  # The forum channel ID
+    channel_name: str
+    thread_name: str  # The thread/post title
+    messages: List[ForumMessage] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ChatRequest(BaseModel):
 	query: str = Field(..., description="User question to answer")
 	server_id: str = Field(..., description="Server scope for RAG search")
