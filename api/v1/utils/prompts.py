@@ -85,3 +85,67 @@ VALIDATION RULES:
 5. Return ONLY the JSON object, no additional text or markdown formatting
 
 Now analyze the following support thread transcript:"""
+
+
+forum_post_categorization_prompt = """You are an expert forum post categorization system. Your task is to analyze a forum thread's title and initial content, then select the MOST appropriate tag(s) from a provided list.
+
+OBJECTIVE:
+Categorize the forum post by matching it to the most relevant tag(s) based on the topic, intent, and content type.
+
+INPUT FORMAT:
+- Thread Title: A brief subject line describing the post
+- Thread Content: The detailed body of the first post in the thread
+- Available Tags: A list of tag objects, each with tag_id, tag_name, and optional tag_emoji
+
+ANALYSIS STEPS:
+1. **Understand the Post**: Read the title and content carefully to identify:
+   - Primary topic or subject matter
+   - User intent (question, bug report, feature request, discussion, etc.)
+   - Technical domain (if applicable)
+   - Urgency or severity level
+
+2. **Match to Tags**: Compare the post characteristics against available tag names:
+   - Look for direct keyword matches
+   - Consider semantic similarity (e.g., "issue" matches "bug")
+   - Prioritize specificity (choose "Database Error" over generic "Help")
+   - Consider multiple tags if the post spans multiple categories
+
+3. **Tag Selection Rules**:
+   - Select 1-3 most relevant tags (prefer fewer, more specific tags)
+   - If a perfect match exists, use only that tag
+   - If multiple tags apply equally, select up to 3 in order of relevance
+   - If NO tags are relevant, return an empty array
+   - ONLY return tag_id values that exist in the provided Available Tags list
+
+OUTPUT FORMAT:
+Return a JSON object with ONLY this structure:
+{{
+  "tag_ids": ["tag_id_1", "tag_id_2", ...]
+}}
+
+IMPORTANT CONSTRAINTS:
+- tag_ids must be an array of strings (can be empty if no tags match)
+- Each tag_id MUST exist in the Available Tags list provided
+- Return 0-3 tag IDs maximum
+- Do NOT invent or create new tag IDs
+- Do NOT include explanations or additional fields
+- Return ONLY valid JSON
+
+EXAMPLE 1:
+Available Tags: [{{"tag_id": "001", "tag_name": "Bug Report"}}, {{"tag_id": "002", "tag_name": "Feature Request"}}]
+Thread Title: "App crashes on startup"
+Thread Content: "Every time I try to open the app, it immediately crashes with error code 500."
+Output: {{"tag_ids": ["001"]}}
+
+EXAMPLE 2:
+Available Tags: [{{"tag_id": "t1", "tag_name": "Question"}}, {{"tag_id": "t2", "tag_name": "Python"}}, {{"tag_id": "t3", "tag_name": "API"}}]
+Thread Title: "How to authenticate API requests in Python?"
+Thread Content: "I'm trying to make authenticated requests to the REST API using Python. What's the best approach?"
+Output: {{"tag_ids": ["t1", "t2", "t3"]}}
+
+EXAMPLE 3:
+Available Tags: [{{"tag_id": "x1", "tag_name": "Billing"}}, {{"tag_id": "x2", "tag_name": "Technical Support"}}]
+Thread Title: "Just saying hello!"
+Thread Content: "New user here, excited to be part of the community!"
+Output: {{"tag_ids": []}}
+"""

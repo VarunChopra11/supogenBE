@@ -20,7 +20,10 @@ from api.v1.services.discord_services.discord import (
     refresh_forums_list,
     remove_forum_from_selected,
     track_forum_message,
+    fetch_forum_tags_from_guild,
+    sync_forum_tags,
 )
+from api.v1.services.discord_services.tags import auto_tag_forum_thread
 from api.v1.db.session import DatabaseSession
 
 load_dotenv(override=True)
@@ -222,9 +225,20 @@ async def on_reaction_add(reaction, user):
 
 
 @bot.event
+async def on_thread_create(thread):
+    """
+    Handle forum thread creation events. Automatically categorizes and tags new forum posts.
+    
+    This event is triggered when a new thread is created in a forum channel.
+    """
+    await auto_tag_forum_thread(thread)
+
+
+@bot.event
 async def on_guild_channel_create(channel):
     """
-    Handle channel creation events. Refreshes the forums list when a forum channel is created.
+    Handle channel creation events. Refreshes the forums list and syncs tags 
+    when a forum channel is created.
     """
     try:
         # Only process if it's a forum channel
@@ -238,12 +252,18 @@ async def on_guild_channel_create(channel):
         server_id = str(guild.id)
         
         # Refresh the complete forums list
-        success = await refresh_forums_list(server_id, guild)
+        refresh_success = await refresh_forums_list(server_id, guild)
         
-        if success:
+        # Sync tags (new forum may have tags)
+        tags_sync_success = await sync_forum_tags(server_id, guild)
+        
+        if refresh_success:
             logging.info(f"✅ Refreshed forums list for server {server_id} after channel creation: {channel.name}")
         else:
             logging.warning(f"⚠️ Failed to refresh forums list for server {server_id}")
+            
+        if tags_sync_success:
+            logging.info(f"✅ Synced forum tags for server {server_id} after channel creation")
             
     except Exception as e:
         logging.error(f"Error handling channel creation: {e}", exc_info=True)
@@ -273,6 +293,9 @@ async def on_guild_channel_delete(channel):
         # Remove from selected_forums if present
         remove_success = await remove_forum_from_selected(server_id, forum_id)
         
+        # Sync tags after forum deletion (tags may have been removed)
+        tags_sync_success = await sync_forum_tags(server_id, guild)
+        
         if refresh_success:
             logging.info(f"✅ Refreshed forums list for server {server_id} after channel deletion: {channel.name}")
         else:
@@ -281,8 +304,82 @@ async def on_guild_channel_delete(channel):
         if remove_success:
             logging.info(f"✅ Removed forum {forum_id} from selected_forums for server {server_id}")
             
+        if tags_sync_success:
+            logging.info(f"✅ Synced forum tags for server {server_id} after channel deletion")
+            
     except Exception as e:
         logging.error(f"Error handling channel deletion: {e}", exc_info=True)
+
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    """
+    Handle channel update events. Syncs forum tags when they are added, removed, or modified
+    in forum channels.
+    
+    This event is triggered when any channel property changes, including:
+    - Forum channel tags being added or removed
+    - Tag names, emojis, or moderation status being updated
+    - Any other channel property changes
+    """
+    try:
+        # Only process if it's a forum channel
+        if after.type != ChannelType.forum:
+            return
+        
+        guild = after.guild
+        if not guild:
+            return
+        
+        server_id = str(guild.id)
+        
+        # Check if the server is registered
+        db = DatabaseSession.get_db()
+        if db is None:
+            logging.warning("Database connection is None")
+            return
+            
+        server = await db["discord_servers"].find_one({"server_id": server_id})
+        if not server:
+            # Server not registered, no need to sync
+            return
+        
+        # Check if forum tags have changed by comparing available_tags
+        before_tags = set()
+        after_tags = set()
+        tags_changed = False
+        
+        if hasattr(before, 'available_tags') and before.available_tags:
+            for tag in before.available_tags:
+                before_tags.add((str(tag.id), tag.name, str(tag.emoji) if tag.emoji else None, tag.moderated))
+        
+        if hasattr(after, 'available_tags') and after.available_tags:
+            for tag in after.available_tags:
+                after_tags.add((str(tag.id), tag.name, str(tag.emoji) if tag.emoji else None, tag.moderated))
+        
+        # Determine if tags have changed
+        if before_tags != after_tags:
+            tags_changed = True
+            
+            # Log the changes
+            added_tags = after_tags - before_tags
+            removed_tags = before_tags - after_tags
+            
+            if added_tags:
+                logging.info(f"📌 Forum tags added in {after.name} (Server: {server_id}): {[tag[1] for tag in added_tags]}")
+            if removed_tags:
+                logging.info(f"🗑️ Forum tags removed from {after.name} (Server: {server_id}): {[tag[1] for tag in removed_tags]}")
+        
+        # Sync tags if they changed
+        if tags_changed:
+            success = await sync_forum_tags(server_id, guild)
+            if success:
+                logging.info(f"✅ Successfully synced forum tags for server {server_id} after update to {after.name}")
+            else:
+                logging.warning(f"⚠️ Failed to sync forum tags for server {server_id}")
+                
+    except Exception as e:
+        logging.error(f"Error handling channel update: {e}", exc_info=True)
 
 
 # --- /Authenticate Command for Bot-Server Mapping ---
@@ -308,6 +405,9 @@ async def authenticate(interaction: discord.Interaction, token: str):
                 "forum_name": channel.name,
             })
 
+    # Fetch all forum tags from the guild
+    tags = await fetch_forum_tags_from_guild(guild)
+
     auth_data = {
         "token": token,
         "server_id": str(guild.id),
@@ -317,6 +417,7 @@ async def authenticate(interaction: discord.Interaction, token: str):
         "member_count": guild.member_count,
         "forums": forums,
         "selected_forums": [],
+        "tags": tags,  # Include forum tags
         "bot_permissions": {
             "permissions_value": interaction.app_permissions.value if interaction.app_permissions else None,
             "is_authenticated": False,  # Will be set to True upon successful authentication

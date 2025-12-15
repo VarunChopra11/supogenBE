@@ -11,6 +11,12 @@ class DiscordBotPermissions(BaseModel):
 class Forums(BaseModel):
     forum_id: str
     forum_name: str
+
+class ForumTag(BaseModel):
+    tag_id: str
+    tag_name: str
+    tag_emoji: Optional[str] = None
+    moderated: bool = Field(default=False)
     
 class DiscordServer(BaseModel):
     user_id: str
@@ -20,6 +26,7 @@ class DiscordServer(BaseModel):
     member_count: Optional[int] = None
     forums: Optional[list[Forums]] = None
     selected_forums: Optional[list[Forums]] = None
+    tags: Optional[list[ForumTag]] = Field(default_factory=list)
     bot_permissions: DiscordBotPermissions = Field(default_factory=DiscordBotPermissions)
     joined_at: datetime = Field(default_factory=datetime.now(timezone.utc))
 
@@ -32,6 +39,7 @@ class DiscordServerData(BaseModel):
     member_count: Optional[int] = None
     forums: Optional[list[Forums]] = None
     selected_forums: Optional[list[Forums]] = None
+    tags: Optional[list[ForumTag]] = Field(default_factory=list)
     bot_permissions: DiscordBotPermissions = Field(default_factory=DiscordBotPermissions)
     joined_at: datetime = Field(default_factory=datetime.now(timezone.utc))
 

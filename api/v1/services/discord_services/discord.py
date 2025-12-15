@@ -105,6 +105,7 @@ async def authenticate_server(auth_data: dict) -> bool:
             "member_count": auth_data.get("member_count"),
             "forums": auth_data.get("forums", []),
             "selected_forums": auth_data.get("selected_forums", []),
+            "tags": auth_data.get("tags", []),  # Store forum tags
             "bot_permissions": {
                 "permissions_value": auth_data.get("bot_permissions", {}).get("permissions_value"),
                 "is_authenticated": True,  # Set to True since we're authenticating
@@ -322,6 +323,98 @@ async def remove_forum_from_selected(server_id: str, forum_id: str) -> bool:
         
     except Exception as e:
         logger.error(f"Error removing forum from selected_forums: {e}")
+        return False
+
+
+async def fetch_forum_tags_from_guild(guild) -> list:
+    """
+    Fetch all available tags from all forum channels in a guild.
+    
+    Args:
+        guild: The Discord guild object
+        
+    Returns:
+        list: List of tag dictionaries with tag_id, tag_name, tag_emoji, and moderated fields
+    """
+    try:
+        tags = []
+        seen_tag_ids = set()
+        
+        for channel in guild.channels:
+            if channel.type == ChannelType.forum:
+                # Forum channels have an 'available_tags' attribute
+                if hasattr(channel, 'available_tags') and channel.available_tags:
+                    for tag in channel.available_tags:
+                        # Avoid duplicate tags across multiple forum channels
+                        tag_id = str(tag.id)
+                        if tag_id not in seen_tag_ids:
+                            seen_tag_ids.add(tag_id)
+                            
+                            tag_dict = {
+                                "tag_id": tag_id,
+                                "tag_name": tag.name,
+                                "moderated": tag.moderated,
+                            }
+                            
+                            # Add emoji if present (can be unicode or custom emoji)
+                            if tag.emoji:
+                                if hasattr(tag.emoji, 'name'):
+                                    # Custom emoji
+                                    tag_dict["tag_emoji"] = tag.emoji.name
+                                else:
+                                    # Unicode emoji
+                                    tag_dict["tag_emoji"] = str(tag.emoji)
+                            else:
+                                tag_dict["tag_emoji"] = None
+                            
+                            tags.append(tag_dict)
+        
+        logger.info(f"Fetched {len(tags)} unique tags from guild {guild.id}")
+        return tags
+        
+    except Exception as e:
+        logger.error(f"Error fetching forum tags from guild: {e}", exc_info=True)
+        return []
+
+
+async def sync_forum_tags(server_id: str, guild) -> bool:
+    """
+    Synchronize forum channel tags for a server by fetching current tags and updating database.
+    
+    Args:
+        server_id: The Discord server ID
+        guild: The Discord guild object
+        
+    Returns:
+        bool: True if sync successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+        
+        # Fetch all current tags from forum channels
+        tags = await fetch_forum_tags_from_guild(guild)
+        
+        # Update the tags list in the database
+        result = await db["discord_servers"].update_one(
+            {"server_id": str(server_id)},
+            {"$set": {
+                "tags": tags,
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully synced {len(tags)} tags for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error syncing forum tags: {e}", exc_info=True)
         return False
     
 async def send_message(
