@@ -7,7 +7,7 @@ from api.v1.schemas.users import UserResponse
 from api.v1.config import deploymentConfig
 
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter()
 
 bearer = HTTPBearer(auto_error=False)
 auth_service = AuthService()

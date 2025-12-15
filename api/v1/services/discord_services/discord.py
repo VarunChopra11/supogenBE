@@ -1,50 +1,30 @@
-from api.v1.utils.crypto import fernet_decrypt
-from typing import AsyncGenerator, Optional
+from discord import ChannelType, Thread
+from datetime import datetime, timezone
+from typing import Optional
+import logging
 import jwt
+
+from api.v1.utils.prompts import chat_system_prompt
+from api.v1.utils.crypto import fernet_decrypt
+from api.v1.utils.exceptions import (
+    AuthenticationError,
+    ServerAlreadyRegisteredError,
+    TokenAlreadyUsedError,
+    UserNotFoundError,
+    InvalidTokenError,
+    DatabaseError,
+)
 from api.v1.config import auth_config
 from api.v1.db.session import DatabaseSession
-from datetime import datetime, timezone
-import logging
 from api.v1.services.embed import (
     generate_text_embedding,
     search_similar_docs,
-    get_openai_chat_completion,
     get_openai_chat_completion_with_history,
 )
 from api.v1.services.chats import chat_service
 from api.v1.schemas.chats import ChatMessage
 
 logger = logging.getLogger(__name__)
-
-
-class AuthenticationError(Exception):
-    """Base exception for authentication errors"""
-    pass
-
-
-class ServerAlreadyRegisteredError(AuthenticationError):
-    """Raised when server is already registered with the bot"""
-    pass
-
-
-class TokenAlreadyUsedError(AuthenticationError):
-    """Raised when JWT token has already been used"""
-    pass
-
-
-class UserNotFoundError(AuthenticationError):
-    """Raised when user is not found in database"""
-    pass
-
-
-class InvalidTokenError(AuthenticationError):
-    """Raised when JWT token is invalid or expired"""
-    pass
-
-
-class DatabaseError(AuthenticationError):
-    """Raised when there's a database connection issue"""
-    pass
 
 
 async def authenticate_server(auth_data: dict) -> bool:
@@ -123,6 +103,9 @@ async def authenticate_server(auth_data: dict) -> bool:
             "owner_id": auth_data.get("owner_id"),
             "owner_username": auth_data.get("owner_username"),
             "member_count": auth_data.get("member_count"),
+            "forums": auth_data.get("forums", []),
+            "selected_forums": auth_data.get("selected_forums", []),
+            "tags": auth_data.get("tags", []),  # Store forum tags
             "bot_permissions": {
                 "permissions_value": auth_data.get("bot_permissions", {}).get("permissions_value"),
                 "is_authenticated": True,  # Set to True since we're authenticating
@@ -210,13 +193,229 @@ async def get_user_servers(user_id: str) -> list:
             
         servers = await db["discord_servers"].find(
             {"user_id": str(user_id)},
-            {"_id": 0, "server_id": 1, "server_name": 1, "member_count": 1}
+            {"_id": 0, "server_id": 1, "server_name": 1, "member_count": 1, "forums": 1, "selected_forums": 1}
         ).to_list(length=None)
         
         return servers
     except Exception as e:
         logger.error(f"Error getting user servers: {e}")
         return []
+
+
+async def update_selected_forums(user_id: str, server_id: str, selected_forums: list) -> bool:
+    """
+    Update the selected_forums list for a specific server.
+    
+    Args:
+        user_id: The user ID who owns the server registration
+        server_id: The Discord server ID to update
+        selected_forums: List of forum dictionaries with forum_id and forum_name
+        
+    Returns:
+        bool: True if update successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+            
+        # Update the selected_forums field for the server
+        result = await db["discord_servers"].update_one(
+            {"user_id": str(user_id), "server_id": str(server_id)},
+            {"$set": {
+                "selected_forums": selected_forums,
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for user_id={user_id}, server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully updated selected_forums for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating selected forums: {e}")
+        return False
+
+
+async def refresh_forums_list(server_id: str, guild) -> bool:
+    """
+    Refresh the complete forums list for a server by querying all forum channels.
+    
+    Args:
+        server_id: The Discord server ID
+        guild: The Discord guild object
+        
+    Returns:
+        bool: True if update successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+        
+        # Collect all current forum channels
+        forums = []
+        for channel in guild.channels:
+            if str(channel.type) == "forum":  # ChannelType.forum
+                forums.append({
+                    "forum_id": str(channel.id),
+                    "forum_name": channel.name,
+                })
+        
+        # Update the forums list in the database
+        result = await db["discord_servers"].update_one(
+            {"server_id": str(server_id)},
+            {"$set": {
+                "forums": forums,
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully refreshed forums list for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error refreshing forums list: {e}")
+        return False
+
+
+async def remove_forum_from_selected(server_id: str, forum_id: str) -> bool:
+    """
+    Remove a specific forum from the selected_forums list.
+    
+    Args:
+        server_id: The Discord server ID
+        forum_id: The forum channel ID to remove
+        
+    Returns:
+        bool: True if update successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+        
+        # Pull the forum from selected_forums array
+        result = await db["discord_servers"].update_one(
+            {"server_id": str(server_id)},
+            {
+                "$pull": {"selected_forums": {"forum_id": str(forum_id)}},
+                "$set": {"updated_at": datetime.now(timezone.utc)}
+            }
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully removed forum {forum_id} from selected_forums for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error removing forum from selected_forums: {e}")
+        return False
+
+
+async def fetch_forum_tags_from_guild(guild) -> list:
+    """
+    Fetch all available tags from all forum channels in a guild.
+    
+    Args:
+        guild: The Discord guild object
+        
+    Returns:
+        list: List of tag dictionaries with tag_id, tag_name, tag_emoji, and moderated fields
+    """
+    try:
+        tags = []
+        seen_tag_ids = set()
+        
+        for channel in guild.channels:
+            if channel.type == ChannelType.forum:
+                # Forum channels have an 'available_tags' attribute
+                if hasattr(channel, 'available_tags') and channel.available_tags:
+                    for tag in channel.available_tags:
+                        # Avoid duplicate tags across multiple forum channels
+                        tag_id = str(tag.id)
+                        if tag_id not in seen_tag_ids:
+                            seen_tag_ids.add(tag_id)
+                            
+                            tag_dict = {
+                                "tag_id": tag_id,
+                                "tag_name": tag.name,
+                                "moderated": tag.moderated,
+                            }
+                            
+                            # Add emoji if present (can be unicode or custom emoji)
+                            if tag.emoji:
+                                if hasattr(tag.emoji, 'name'):
+                                    # Custom emoji
+                                    tag_dict["tag_emoji"] = tag.emoji.name
+                                else:
+                                    # Unicode emoji
+                                    tag_dict["tag_emoji"] = str(tag.emoji)
+                            else:
+                                tag_dict["tag_emoji"] = None
+                            
+                            tags.append(tag_dict)
+        
+        logger.info(f"Fetched {len(tags)} unique tags from guild {guild.id}")
+        return tags
+        
+    except Exception as e:
+        logger.error(f"Error fetching forum tags from guild: {e}", exc_info=True)
+        return []
+
+
+async def sync_forum_tags(server_id: str, guild) -> bool:
+    """
+    Synchronize forum channel tags for a server by fetching current tags and updating database.
+    
+    Args:
+        server_id: The Discord server ID
+        guild: The Discord guild object
+        
+    Returns:
+        bool: True if sync successful, False otherwise
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None")
+            return False
+        
+        # Fetch all current tags from forum channels
+        tags = await fetch_forum_tags_from_guild(guild)
+        
+        # Update the tags list in the database
+        result = await db["discord_servers"].update_one(
+            {"server_id": str(server_id)},
+            {"$set": {
+                "tags": tags,
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
+        
+        if result.matched_count == 0:
+            logger.warning(f"No server found for server_id={server_id}")
+            return False
+            
+        logger.info(f"Successfully synced {len(tags)} tags for server {server_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error syncing forum tags: {e}", exc_info=True)
+        return False
     
 async def send_message(
     messages, 
@@ -232,18 +431,8 @@ async def send_message(
     - Creates new chat if thread is new
     - Includes full conversation history in context
     - Stores user message and bot response after completion
-    
-    Args:
-        messages: List like [{"type": "text", "text": "your question"}]
-        user_id: The user's ID to scope search
-        server_id: The Discord server ID to scope search
-        thread_id: Discord thread ID for conversation tracking
-        channel_id: Discord channel ID
-        
-    Returns:
-        str: The complete bot response
     """
-    collected_response = []
+
     chat_id = None
     
     try:
@@ -262,11 +451,18 @@ async def send_message(
         # 2) Perform vector search for context
         query_embedding = await generate_text_embedding(user_query)
         top_docs = await search_similar_docs(
-            query_embedding, top_k=4, user_id=user_id, server_id=server_id
+            query_embedding, 
+            top_k=4, 
+            user_id=user_id, 
+            server_id=server_id,
         )
-        context = "\n\n".join([doc.get("text", "") for doc in top_docs])
-        if not context.strip():
-            context = "No relevant context retrieved."
+        
+        if not top_docs:
+            context = "No sufficiently relevant context found in the knowledge base."
+            logger.info(f"No documents met similarity threshold for Discord query: {user_query[:50]}...")
+        else:
+            context = "\n\n".join([doc.get("text", "") for doc in top_docs])
+            logger.info(f"Retrieved {len(top_docs)} documents with scores: {[doc.get('score', 0) for doc in top_docs]}")
         
         # Extract sources from retrieved documents
         sources = list({doc.get("doc_url") for doc in top_docs if doc.get("doc_url")})
@@ -275,12 +471,7 @@ async def send_message(
         msg_array = []
         
         # System message with context
-        system_prompt = (
-            "You are a helpful AI assistant for SaaS documentation. "
-            "Use the below context to answer the user's question clearly and accurately. "
-            "If the answer isn't in the docs, say so.\n\n"
-            f"### Context:\n{context}"
-        )
+        system_prompt = chat_system_prompt + f"### Context:\n{context}"
         msg_array.append({"role": "system", "content": system_prompt})
         
         # Add conversation history if continuing a thread
@@ -295,11 +486,7 @@ async def send_message(
         # Add current user query
         msg_array.append({"role": "user", "content": user_query})
         
-        # 4) Get completion with full context
-        async for chunk in get_openai_chat_completion_with_history(msg_array):
-            collected_response.append(chunk)
-        
-        full_response = "".join(collected_response)
+        full_response = await get_openai_chat_completion_with_history(messages=msg_array)
         
         # 5) Store chat messages
         try:
@@ -337,41 +524,75 @@ async def send_message(
         return f"⚠️ Error: {e}"
 
 
-async def send_message_stream(messages, user_id: str, server_id: str) -> AsyncGenerator[str, None]:
+async def track_forum_message(message, server: dict, db):
     """
-    Streaming version used by the Discord bot. Yields chunks of the model
-    response as they arrive.
-
+    Track messages in forum threads for selected forums.
+    
     Args:
-        messages: List like [{"type": "text", "text": "..."}]
-        user_id: The user's ID to scope search
-        server_id: The Discord server ID to scope search
-    Yields:
-        str chunks of the answer.
+        message: The Discord message object
+        server: The server document from discord_servers collection
+        db: Database connection
     """
     try:
-        user_query = messages[0]["text"]
-        query_embedding = await generate_text_embedding(user_query)
-        top_docs = await search_similar_docs(
-            query_embedding, top_k=4, user_id=user_id, server_id=server_id
-        )
-        context = "\n\n".join([doc.get("text", "") for doc in top_docs])
-        prompt = f"""
-        You are a helpful AI assistant for SaaS documentation.
-        Use the below context to answer the user's question clearly and accurately.
-        If the answer isn't in the docs, say so.
-
-        ### Context:
-        {context}
-
-        ### Question:
-        {user_query}
-
-        Answer:
-        """
-        async for chunk in get_openai_chat_completion(prompt):
-            if chunk:
-                yield chunk
+        
+        # Check if message is in a thread and if thread has a parent (forum channel)
+        if not isinstance(message.channel, Thread):
+            return
+        
+        # Get parent channel (should be a forum channel)
+        parent_channel = message.channel.parent
+        if not parent_channel or parent_channel.type != ChannelType.forum:
+            return
+        
+        # Check if this forum is in selected_forums
+        selected_forums = server.get("selected_forums", [])
+        forum_id = str(parent_channel.id)
+        
+        is_selected = any(forum.get("forum_id") == forum_id for forum in selected_forums)
+        if not is_selected:
+            return
+        
+        # Prepare message data
+        message_data = {
+            "discord_message_id": str(message.id),
+            "discord_user_id": str(message.author.id),
+            "discord_user_name": message.author.name,
+            "message": message.content,
+            "created_at": datetime.now(timezone.utc)
+        }
+        
+        thread_id = str(message.channel.id)
+        user_id = server.get("user_id")
+        server_id = server.get("server_id")
+        
+        # Check if forum_chats document exists for this thread
+        existing_chat = await db["forum_chats"].find_one({"thread_id": thread_id})
+        
+        if existing_chat:
+            # Append message to existing chat
+            await db["forum_chats"].update_one(
+                {"thread_id": thread_id},
+                {
+                    "$push": {"messages": message_data},
+                    "$set": {"updated_at": datetime.now(timezone.utc)}
+                }
+            )
+            logger.info(f"📝 Appended message to forum chat {thread_id}")
+        else:
+            # Create new forum chat document
+            forum_chat = {
+                "user_id": user_id,
+                "server_id": server_id,
+                "thread_id": thread_id,
+                "channel_id": forum_id,
+                "channel_name": parent_channel.name,
+                "thread_name": message.channel.name,
+                "messages": [message_data],
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
+            }
+            await db["forum_chats"].insert_one(forum_chat)
+            logger.info(f"✨ Created new forum chat for thread {thread_id}")
+            
     except Exception as e:
-        # Surface the error to the user as a single chunk
-        yield f"⚠️ Error: {e}"
+        logger.error(f"Error tracking forum message: {e}", exc_info=True)

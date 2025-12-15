@@ -1,5 +1,5 @@
 .env
-
+git_ignored/
 *__pycache__/
 *.pyc
 *.pyo

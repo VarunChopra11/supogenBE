@@ -1,6 +1,7 @@
 from typing import Optional, List, Dict, Any, AsyncGenerator
-from dotenv import load_dotenv
 from openai import AsyncAzureOpenAI, AsyncOpenAI, APIError, APIConnectionError, RateLimitError
+from dotenv import load_dotenv
+
 from api.v1.db.session import DatabaseSession
 from api.v1.config import ai_config
 
@@ -40,25 +41,33 @@ async def generate_text_embedding(text: str) -> Optional[List[float]]:
     except Exception as e:
         raise RuntimeError(f"Unexpected error generating embedding: {e}") from e
 
-
-async def get_openai_chat_completion(prompt: str) -> AsyncGenerator[str, None]:
-    """Stream GPT-4o-mini chat completions asynchronously."""
-    if not prompt or not isinstance(prompt, str):
-        raise ValueError("Prompt must be a non-empty string")
+async def stream_openai_chat_completion_with_history(
+    messages: List[Dict[str, str]],
+) -> AsyncGenerator[str, None]:
+    """
+    GPT-4o-mini chat completion with full message history.
+    Provides streaming response.
+    """
+    if not messages or not isinstance(messages, list):
+        raise ValueError("Messages must be a non-empty list")
 
     try:
-        stream = await async_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt.strip()}],
-            temperature=0.2,
-            stream=True
-        )
-        async for chunk in stream:
+        params = {
+            "model": "gpt-4o-mini",
+            "messages": messages,
+            "temperature": 0.2,
+            "stream": True
+        }
+
+        response = await async_client.chat.completions.create(**params)
+
+        async for chunk in response:
             if not chunk.choices or not chunk.choices[0].delta:
                 continue
             delta = chunk.choices[0].delta.content
             if delta:
                 yield delta
+
     except RateLimitError as e:
         raise RuntimeError("Rate limit exceeded. Please try again later.") from e
     except APIConnectionError as e:
@@ -70,31 +79,29 @@ async def get_openai_chat_completion(prompt: str) -> AsyncGenerator[str, None]:
 
 
 async def get_openai_chat_completion_with_history(
-    messages: List[Dict[str, str]]
-) -> AsyncGenerator[str, None]:
+    messages: List[Dict[str, str]],
+    response_format: dict | None = None
+) -> str:
     """
-    Stream GPT-4o-mini chat completions with full message history.
-    
-    Args:
-        messages: List of message dicts with 'role' and 'content' keys
+    GPT-4o-mini chat completion with full message history (non-streaming).
     """
     if not messages or not isinstance(messages, list):
         raise ValueError("Messages must be a non-empty list")
 
     try:
-        stream = await async_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.2,
-            max_tokens=600,
-            stream=True
-        )
-        async for chunk in stream:
-            if not chunk.choices or not chunk.choices[0].delta:
-                continue
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        params = {
+            "model": "gpt-4o-mini",
+            "messages": messages,
+            "temperature": 0.2,
+            "stream": False
+        }
+        if response_format is not None:
+            params["response_format"] = response_format
+
+        response = await async_client.chat.completions.create(**params)
+
+        return response.choices[0].message.content
+
     except RateLimitError as e:
         raise RuntimeError("Rate limit exceeded. Please try again later.") from e
     except APIConnectionError as e:
@@ -122,10 +129,11 @@ async def search_similar_docs(
     user_id: str,
     server_id: str,
     top_k: int = 4,
+    min_score: Optional[float] = 0.7,
 ) -> List[Dict[str, Any]]:
     """
     Perform MongoDB Atlas vector search for similar documents using Motor's async cursor.
-    Returns a list of result documents filtered by user_id and server_id.
+    Returns a list of result documents filtered by user_id, server_id, and similarity score.
     """
     if not query_embedding or not isinstance(query_embedding, list):
         raise ValueError("Query embedding must be a non-empty list of floats")
@@ -136,12 +144,21 @@ async def search_similar_docs(
                 "index": "chunks_vector_index",
                 "path": "embedding",
                 "queryVector": query_embedding,
-                "limit": top_k,            # required by Atlas
-                "numCandidates": 100,      # tune as needed
+                "limit": top_k,
+                "numCandidates": 100,
                 "filter": {
                     "user_id": user_id,
                     "server_id": server_id
                 }
+            }
+        },
+        {
+            "$project": {
+                "text": 1,
+                "doc_url": 1,
+                "user_id": 1,
+                "server_id": 1,
+                "score": {"$meta": "vectorSearchScore"}
             }
         }
     ]
@@ -151,4 +168,8 @@ async def search_similar_docs(
 
     cursor = db["embedded_documents"].aggregate(pipeline)
     docs_list = await cursor.to_list(length=top_k)
-    return docs_list
+    
+    # Filter documents by minimum similarity score
+    filtered_docs = [doc for doc in docs_list if doc.get("score", 0) >= min_score]
+    
+    return filtered_docs

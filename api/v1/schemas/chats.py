@@ -23,7 +23,6 @@ class DiscordChat(BaseModel):
     chat_id: str
     user_id: str
     server_id: str
-    # Optional Discord specific metadata (channel/thread, etc.)
     channel_id: Optional[str] = None
     thread_id: Optional[str] = None
     messages: List[ChatMessage] = Field(default_factory=list)
@@ -31,3 +30,31 @@ class DiscordChat(BaseModel):
     resolution_time: Optional[float] = Field(default=None, description="Time taken to resolve the query in seconds")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ForumMessage(BaseModel):
+    """Individual message within a forum thread."""
+    discord_message_id: str
+    discord_user_id: str
+    discord_user_name: str
+    message: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ForumChat(BaseModel):
+    """Forum thread chat document structure."""
+    user_id: str
+    server_id: str
+    thread_id: str
+    channel_id: str  # The forum channel ID
+    channel_name: str
+    thread_name: str  # The thread/post title
+    messages: List[ForumMessage] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ChatRequest(BaseModel):
+	query: str = Field(..., description="User question to answer")
+	server_id: str = Field(..., description="Server scope for RAG search")
+	chat_id: Optional[str] = Field(None, description="Chat ID to continue existing conversation")
+	top_k: int = Field(4, ge=1, le=20, description="Number of chunks to retrieve")
