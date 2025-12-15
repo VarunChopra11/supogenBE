@@ -41,14 +41,12 @@ async def generate_text_embedding(text: str) -> Optional[List[float]]:
     except Exception as e:
         raise RuntimeError(f"Unexpected error generating embedding: {e}") from e
 
-async def get_openai_chat_completion_with_history(
+async def stream_openai_chat_completion_with_history(
     messages: List[Dict[str, str]],
-    stream: bool = True,
-    response_format: dict | None = None
-) -> AsyncGenerator[str, None] | str:
+) -> AsyncGenerator[str, None]:
     """
     GPT-4o-mini chat completion with full message history.
-    Streams by default, but can return full response when stream=False.
+    Provides streaming response.
     """
     if not messages or not isinstance(messages, list):
         raise ValueError("Messages must be a non-empty list")
@@ -58,21 +56,49 @@ async def get_openai_chat_completion_with_history(
             "model": "gpt-4o-mini",
             "messages": messages,
             "temperature": 0.2,
-            "stream": stream
+            "stream": True
+        }
+
+        response = await async_client.chat.completions.create(**params)
+
+        async for chunk in response:
+            if not chunk.choices or not chunk.choices[0].delta:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+
+    except RateLimitError as e:
+        raise RuntimeError("Rate limit exceeded. Please try again later.") from e
+    except APIConnectionError as e:
+        raise RuntimeError("Connection to OpenAI failed. Check your internet connection.") from e
+    except APIError as e:
+        raise RuntimeError(f"OpenAI API error: {e}") from e
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error in chat completion: {e}") from e
+
+
+async def get_openai_chat_completion_with_history(
+    messages: List[Dict[str, str]],
+    response_format: dict | None = None
+) -> str:
+    """
+    GPT-4o-mini chat completion with full message history (non-streaming).
+    """
+    if not messages or not isinstance(messages, list):
+        raise ValueError("Messages must be a non-empty list")
+
+    try:
+        params = {
+            "model": "gpt-4o-mini",
+            "messages": messages,
+            "temperature": 0.2,
+            "stream": False
         }
         if response_format is not None:
             params["response_format"] = response_format
 
         response = await async_client.chat.completions.create(**params)
-
-        if stream:
-            async for chunk in response:
-                if not chunk.choices or not chunk.choices[0].delta:
-                    continue
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    yield delta
-            return
 
         return response.choices[0].message.content
 

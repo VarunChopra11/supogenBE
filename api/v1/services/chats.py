@@ -11,7 +11,7 @@ from api.v1.schemas.chats import PlaygroundChat, DiscordChat, ChatMessage
 from api.v1.services.embed import (
     generate_text_embedding,
     search_similar_docs,
-    get_openai_chat_completion_with_history,
+    stream_openai_chat_completion_with_history,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,7 +153,7 @@ class ChatService:
             messages.append({"role": "user", "content": query})
 
             # 6) Stream model output with full context
-            async for delta in get_openai_chat_completion_with_history(messages):
+            async for delta in stream_openai_chat_completion_with_history(messages):
                 collected_response.append(delta)
                 # Send as SSE data frames
                 yield f"data: {json.dumps(delta)}\n\n"

@@ -174,7 +174,6 @@ class ForumChatService:
         try:
             response_text = await get_openai_chat_completion_with_history(
                 messages=messages,
-                stream=False,
                 response_format=response_format
             )
             

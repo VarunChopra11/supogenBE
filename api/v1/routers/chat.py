@@ -51,6 +51,25 @@ async def chat(
 	)
 
 
+@router.get("/chat_history", response_model=List[PlaygroundChat])
+async def get_chat_history(
+	server_id: str,
+	limit: int = 20,
+	user=Depends(auth_service.get_current_user),
+):
+	"""Return playground chats for the current user filtered by server_id, newest first."""
+	try:
+		if not server_id:
+			raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="server_id is required")
+		chats = await chat_service.get_playground_chat_history(user_id=user["user_id"], server_id=server_id, limit=limit)
+		return chats
+	except HTTPException:
+		raise
+	except Exception as e:
+		logger.error(f"Error fetching chat history: {e}", exc_info=True)
+		raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch chat history")
+
+
 @router.get("/{chat_id}", response_model=PlaygroundChat)
 async def get_chat(
 	chat_id: str,
@@ -78,22 +97,3 @@ async def get_chat(
 			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
 			detail="Failed to fetch chat"
 		)
-
-
-@router.get("/chat_history", response_model=List[PlaygroundChat])
-async def get_chat_history(
-	server_id: str,
-	limit: int = 20,
-	user=Depends(auth_service.get_current_user),
-):
-	"""Return playground chats for the current user filtered by server_id, newest first."""
-	try:
-		if not server_id:
-			raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="server_id is required")
-		chats = await chat_service.get_playground_chat_history(user_id=user["user_id"], server_id=server_id, limit=limit)
-		return chats
-	except HTTPException:
-		raise
-	except Exception as e:
-		logger.error(f"Error fetching chat history: {e}", exc_info=True)
-		raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch chat history")

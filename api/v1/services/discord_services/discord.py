@@ -393,7 +393,7 @@ async def send_message(
         # Add current user query
         msg_array.append({"role": "user", "content": user_query})
         
-        full_response = await get_openai_chat_completion_with_history(messages=msg_array, stream=False)
+        full_response = await get_openai_chat_completion_with_history(messages=msg_array)
         
         # 5) Store chat messages
         try:
