@@ -129,7 +129,7 @@ async def search_similar_docs(
     user_id: str,
     server_id: str,
     top_k: int = 4,
-    min_score: Optional[float] = 0.7,
+    min_score: Optional[float] = 0.5,
 ) -> List[Dict[str, Any]]:
     """
     Perform MongoDB Atlas vector search for similar documents using Motor's async cursor.
