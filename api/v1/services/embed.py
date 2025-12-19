@@ -234,39 +234,58 @@ async def get_context_from_sources(
     server_id: str,
     top_k: int = 4,
 ) -> tuple[str, set]:
+    """
+    Retrieve relevant context from both embedded documents and forum chat summaries.
+    Combines the results into a single context string and collects source URLs.
+    Returns empty sources set when no relevant context is found.
+    """
     
-
-
-    doc_chunks = await search_similar_docs(
-        query_embedding=query_embedding,
-        user_id=user_id,
-        server_id=server_id,
-        top_k=top_k,
-    )
-
-    forum_chunks = await search_similar_forum_chats(
-        query_embedding=query_embedding,
-        user_id=user_id,
-        server_id=server_id,
-        top_k=top_k,
-    )
-
+    # Initialize return values
     sources = set()
     context_parts = []
     
-    # Process document chunks
+    # Safely retrieve document chunks
+    try:
+        doc_chunks = await search_similar_docs(
+            query_embedding=query_embedding,
+            user_id=user_id,
+            server_id=server_id,
+            top_k=top_k,
+        )
+    except Exception as e:
+        # Log error but continue - we can still try forum chunks
+        print(f"Error searching documents: {e}")
+        doc_chunks = []
+
+    # Safely retrieve forum chat chunks
+    try:
+        forum_chunks = await search_similar_forum_chats(
+            query_embedding=query_embedding,
+            user_id=user_id,
+            server_id=server_id,
+            top_k=top_k,
+        )
+    except Exception as e:
+        # Log error but continue - we may have doc chunks
+        print(f"Error searching forum chats: {e}")
+        forum_chunks = []
+    
+    # Process document chunks (handle None or empty list)
     if doc_chunks:
         doc_texts = []
         for doc in doc_chunks:
-            if doc.get("text"):
-                doc_texts.append(doc["text"])
-            if doc.get("doc_url"):
-                sources.add(doc["doc_url"])
+            text = doc.get("text")
+            doc_url = doc.get("doc_url")
+            
+            if text and text.strip():  # Ensure text is not empty or whitespace
+                doc_texts.append(text)
+            if doc_url:
+                sources.add(doc_url)
         
         if doc_texts:
-            context_parts.append("## Documentation:\n" + "\n\n".join(doc_texts))
+            context_parts.append("\n\n## Documentation:\n" + "\n\n".join(doc_texts))
     
-    # Process forum chat chunks
+    # Process forum chat chunks (handle None or empty list)
     if forum_chunks:
         forum_texts = []
         for chat in forum_chunks:
@@ -274,14 +293,14 @@ async def get_context_from_sources(
             thread_name = chat.get("thread_name", "Unknown Thread")
             channel_name = chat.get("channel_name", "Unknown Channel")
             
-            if summary:
+            if summary and summary.strip():  # Ensure summary is not empty or whitespace
                 forum_text = f"**Forum Thread**: {thread_name} (in #{channel_name})\n{summary}"
                 forum_texts.append(forum_text)
         
         if forum_texts:
-            context_parts.append("## Past Support Discussions:\n" + "\n\n".join(forum_texts))
+            context_parts.append("\n\n## Past Support Discussions:\n" + "\n\n".join(forum_texts))
     
-    # Combine all context parts
+    # Combine all context parts or return fallback message
     if context_parts:
         final_context = "\n\n".join(context_parts)
     else:
