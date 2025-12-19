@@ -10,7 +10,7 @@ from api.v1.utils.prompts import chat_system_prompt
 from api.v1.schemas.chats import PlaygroundChat, DiscordChat, ChatMessage
 from api.v1.services.embed import (
     generate_text_embedding,
-    search_similar_docs,
+    get_context_from_sources,
     stream_openai_chat_completion_with_history,
 )
 
@@ -92,7 +92,7 @@ class ChatService:
         sources = set()
         
         try:
-            # 1) Get or validate existing chat
+            # Get or validate existing chat
             existing_chat = None
             if final_chat_id:
                 existing_chat = await self.get_playground_chat_by_id(
@@ -110,35 +110,25 @@ class ChatService:
                         detail="server_id mismatch with existing chat",
                     )
             
-            # 2) Embed the query
+            # Embed the query
             query_embedding = await generate_text_embedding(query)
 
-            # 3) Vector search scoped by user and server
-            top_docs = await search_similar_docs(
+            # Get context from sources
+            context, sources = await get_context_from_sources(
                 query_embedding=query_embedding,
                 user_id=user_id,
                 server_id=server_id,
                 top_k=top_k,
             )
 
-            sources = {d.get("doc_url") for d in top_docs if d.get("doc_url")}
-
             # Stream sources first so client can render citations early
             yield "event: sources\n" + f"data: {json.dumps(list(sources))}\n\n"
 
-            # 4) Build context from retrieved documents
-            if not top_docs:
-                context = "No sufficiently relevant context found in the knowledge base."
-                logger.info(f"No documents met similarity threshold for query: {query[:50]}...")
-            else:
-                context = "\n\n".join([d.get("text", "") for d in top_docs])
-                logger.info(f"Retrieved {len(top_docs)} documents with scores: {[d.get('score', 0) for d in top_docs]}")
-
-            # 5) Build messages array with complete history
+            # Build messages array with complete history
             messages = []
             
             # System message with context
-            system_prompt = chat_system_prompt + f"### Context:\n{context}"
+            system_prompt = chat_system_prompt + f"\n\n### Context:\n{context}"
             messages.append({"role": "system", "content": system_prompt})
             
             # Add conversation history if continuing a chat
@@ -152,13 +142,13 @@ class ChatService:
             # Add current user query
             messages.append({"role": "user", "content": query})
 
-            # 6) Stream model output with full context
+            # Stream model output with full context
             async for delta in stream_openai_chat_completion_with_history(messages):
                 collected_response.append(delta)
                 # Send as SSE data frames
                 yield f"data: {json.dumps(delta)}\n\n"
 
-            # 7) Create chat_id if new conversation
+            # Create chat_id if new conversation
             if not final_chat_id:
                 final_chat_id = await self.create_playground_chat(
                     user_id=user_id,
@@ -179,7 +169,7 @@ class ChatService:
             yield "event: error\n" + f"data: {json.dumps({'message': 'Internal server error'})}\n\n"
         
         finally:
-            # 8) Store messages in database after streaming completes
+            # Store messages in database after streaming completes
             if final_chat_id and collected_response:
                 try:
                     complete_response = "".join(collected_response)

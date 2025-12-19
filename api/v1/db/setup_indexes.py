@@ -101,6 +101,10 @@ async def setup_discord_context_index():
                 },
                 {
                     "type": "filter",
+                    "path": "user_id"
+                },
+                {
+                    "type": "filter",
                     "path": "server_id"
                 }
             ]

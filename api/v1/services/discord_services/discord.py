@@ -18,7 +18,7 @@ from api.v1.config import auth_config
 from api.v1.db.session import DatabaseSession
 from api.v1.services.embed import (
     generate_text_embedding,
-    search_similar_docs,
+    get_context_from_sources,
     get_openai_chat_completion_with_history,
 )
 from api.v1.services.chats import chat_service
@@ -438,7 +438,7 @@ async def send_message(
     try:
         user_query = messages[0]["text"]
         
-        # 1) Check for existing chat in this thread
+        # Check for existing chat in this thread
         existing_chat = None
         if thread_id:
             existing_chat = await chat_service.get_discord_chat_by_thread(
@@ -448,30 +448,24 @@ async def send_message(
                 chat_id = existing_chat.chat_id
                 logger.info(f"Found existing chat {chat_id} for thread {thread_id}")
         
-        # 2) Perform vector search for context
         query_embedding = await generate_text_embedding(user_query)
-        top_docs = await search_similar_docs(
-            query_embedding, 
-            top_k=4, 
-            user_id=user_id, 
+        
+        # Build unified context from both sources
+        context, sources = await get_context_from_sources(
+            query_embedding=query_embedding,
+            user_id=user_id,
             server_id=server_id,
+            top_k=4,
         )
         
-        if not top_docs:
-            context = "No sufficiently relevant context found in the knowledge base."
-            logger.info(f"No documents met similarity threshold for Discord query: {user_query[:50]}...")
-        else:
-            context = "\n\n".join([doc.get("text", "") for doc in top_docs])
-            logger.info(f"Retrieved {len(top_docs)} documents with scores: {[doc.get('score', 0) for doc in top_docs]}")
+        # Convert sources set to list
+        sources = list(sources)
         
-        # Extract sources from retrieved documents
-        sources = list({doc.get("doc_url") for doc in top_docs if doc.get("doc_url")})
-        
-        # 3) Build messages array with history
+        # Build messages array with history
         msg_array = []
         
         # System message with context
-        system_prompt = chat_system_prompt + f"### Context:\n{context}"
+        system_prompt = chat_system_prompt + f"\n\n### Context:\n{context}"
         msg_array.append({"role": "system", "content": system_prompt})
         
         # Add conversation history if continuing a thread
@@ -486,9 +480,10 @@ async def send_message(
         # Add current user query
         msg_array.append({"role": "user", "content": user_query})
         
+        # Get completion from OpenAI
         full_response = await get_openai_chat_completion_with_history(messages=msg_array)
         
-        # 5) Store chat messages
+        # Store chat messages
         try:
             if not chat_id:
                 # Create new chat for this thread

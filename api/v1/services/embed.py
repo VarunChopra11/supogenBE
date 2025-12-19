@@ -173,3 +173,118 @@ async def search_similar_docs(
     filtered_docs = [doc for doc in docs_list if doc.get("score", 0) >= min_score]
     
     return filtered_docs
+
+
+async def search_similar_forum_chats(
+    query_embedding: List[float],
+    user_id: str,
+    server_id: str,
+    top_k: int = 4,
+    min_score: Optional[float] = 0.5,
+) -> List[Dict[str, Any]]:
+    """
+    Perform MongoDB Atlas vector search for similar Discord forum chat summaries.
+    Returns a list of forum chat context chunks filtered by server_id and similarity score.
+    """
+    if not query_embedding or not isinstance(query_embedding, list):
+        raise ValueError("Query embedding must be a non-empty list of floats")
+
+    pipeline = [
+        {
+            "$vectorSearch": {
+                "index": "discord_context_vector_index",
+                "path": "embedding",
+                "queryVector": query_embedding,
+                "limit": top_k,
+                "numCandidates": 100,
+                "filter": {
+                    "user_id": user_id,
+                    "server_id": server_id
+                }
+            }
+        },
+        {
+            "$project": {
+                "summary": 1,
+                "thread_name": 1,
+                "channel_name": 1,
+                "thread_id": 1,
+                "server_id": 1,
+                "score": {"$meta": "vectorSearchScore"}
+            }
+        }
+    ]
+    
+    db = DatabaseSession.get_db()
+    if db is None:
+        raise RuntimeError("Database connection not available")
+
+    cursor = db["discord_context_chunks"].aggregate(pipeline)
+    forum_chats_list = await cursor.to_list(length=top_k)
+    
+    # Filter forum chats by minimum similarity score
+    filtered_chats = [chat for chat in forum_chats_list if chat.get("score", 0) >= min_score]
+    
+    return filtered_chats
+
+
+async def get_context_from_sources(
+    query_embedding: List[float],
+    user_id: str,
+    server_id: str,
+    top_k: int = 4,
+) -> tuple[str, set]:
+    
+
+
+    doc_chunks = await search_similar_docs(
+        query_embedding=query_embedding,
+        user_id=user_id,
+        server_id=server_id,
+        top_k=top_k,
+    )
+
+    forum_chunks = await search_similar_forum_chats(
+        query_embedding=query_embedding,
+        user_id=user_id,
+        server_id=server_id,
+        top_k=top_k,
+    )
+
+    sources = set()
+    context_parts = []
+    
+    # Process document chunks
+    if doc_chunks:
+        doc_texts = []
+        for doc in doc_chunks:
+            if doc.get("text"):
+                doc_texts.append(doc["text"])
+            if doc.get("doc_url"):
+                sources.add(doc["doc_url"])
+        
+        if doc_texts:
+            context_parts.append("## Documentation:\n" + "\n\n".join(doc_texts))
+    
+    # Process forum chat chunks
+    if forum_chunks:
+        forum_texts = []
+        for chat in forum_chunks:
+            summary = chat.get("summary", "")
+            thread_name = chat.get("thread_name", "Unknown Thread")
+            channel_name = chat.get("channel_name", "Unknown Channel")
+            
+            if summary:
+                forum_text = f"**Forum Thread**: {thread_name} (in #{channel_name})\n{summary}"
+                forum_texts.append(forum_text)
+        
+        if forum_texts:
+            context_parts.append("## Past Support Discussions:\n" + "\n\n".join(forum_texts))
+    
+    # Combine all context parts
+    if context_parts:
+        final_context = "\n\n".join(context_parts)
+    else:
+        final_context = "No sufficiently relevant context found in the knowledge base."
+    
+    return final_context, sources
