@@ -62,6 +62,7 @@ class MarkdownProcessResponse(BaseModel):
 class DiscordChatChunk(BaseModel):
     chunk_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     thread_id: str
+    channel_id: str
     user_id: str
     server_id: str
     channel_name: str

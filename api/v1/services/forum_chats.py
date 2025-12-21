@@ -75,6 +75,7 @@ class ForumChatService:
         self,
         summary: str,
         thread_id: str,
+        channel_id: str,
         user_id: str,
         server_id: str,
         channel_name: str,
@@ -96,6 +97,7 @@ class ForumChatService:
             context_chunk = DiscordChatChunk(
                 chunk_id=str(uuid.uuid4()),
                 thread_id=thread_id,
+                channel_id=channel_id,
                 user_id=user_id,
                 server_id=server_id,
                 channel_name=channel_name,
@@ -107,7 +109,7 @@ class ForumChatService:
             
             # Insert into discord_context_chunks collection
             db = DatabaseSession.get_db()
-            await db["discord_context_chunks"].insert_one(context_chunk)
+            await db["discord_context_chunks"].insert_one(context_chunk.model_dump())
             
             logger.info(f"Successfully saved forum context to RAG for thread {thread_id}")
             return True
@@ -214,6 +216,7 @@ class ForumChatService:
         thread_id = forum_chat.get("thread_id", "unknown")
         user_id = forum_chat.get("user_id", "")
         server_id = forum_chat.get("server_id", "")
+        channel_id = forum_chat.get("channel_id", "")
         channel_name = forum_chat.get("channel_name", "")
         thread_name = forum_chat.get("thread_name", "")
         
@@ -255,6 +258,7 @@ class ForumChatService:
                     saved = await self.save_forum_context_to_rag(
                         summary=analysis["summary"],
                         thread_id=thread_id,
+                        channel_id=channel_id,
                         user_id=user_id,
                         server_id=server_id,
                         channel_name=channel_name,

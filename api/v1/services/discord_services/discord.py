@@ -202,9 +202,160 @@ async def get_user_servers(user_id: str) -> list:
         return []
 
 
+async def _backfill_new_forums(server_id: str, user_id: str, forum_ids: list) -> None:
+    """
+    Backfill forum history for newly selected forums.
+    Fetches the last 20 threads from each forum and stores them in forum_chats.
+    
+    Args:
+        server_id: The Discord server ID
+        user_id: The user ID who owns the server registration
+        forum_ids: List of forum channel IDs to backfill
+    """
+    try:
+        # Lazy import to avoid circular dependency
+        from api.v1.services.discord_services.discord_bot import bot
+        
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None in _backfill_new_forums")
+            return
+        
+        # Get the guild object
+        guild = bot.get_guild(int(server_id))
+        if not guild:
+            logger.error(f"Could not find guild with ID {server_id}")
+            return
+        
+        for forum_id in forum_ids:
+            try:
+                # Get the forum channel
+                channel = guild.get_channel(int(forum_id))
+                if not channel or channel.type != ChannelType.forum:
+                    logger.warning(f"Channel {forum_id} is not a valid forum channel")
+                    continue
+                
+                # Collect active and archived threads
+                threads_to_process = []
+                
+                # Get active threads
+                for thread in channel.threads:
+                    threads_to_process.append(thread)
+                
+                # Get archived threads
+                try:
+                    async for archived_thread in channel.archived_threads(limit=20):
+                        threads_to_process.append(archived_thread)
+                except Exception as e:
+                    logger.error(f"Error fetching archived threads for forum {forum_id}: {e}")
+                
+                # Sort by creation time (most recent first) and limit to 20
+                threads_to_process.sort(key=lambda t: t.created_at or datetime.now(timezone.utc), reverse=True)
+                threads_to_process = threads_to_process[:20]
+                
+                logger.info(f"Backfilling {len(threads_to_process)} threads for forum {forum_id}")
+                
+                for thread in threads_to_process:
+                    try:
+                        thread_id = str(thread.id)
+                        
+                        # Check if this thread is already tracked
+                        existing_chat = await db["forum_chats"].find_one({"thread_id": thread_id})
+                        if existing_chat:
+                            logger.debug(f"Thread {thread_id} already exists, skipping")
+                            continue
+                        
+                        # Fetch the starter message (first message in thread)
+                        messages_list = []
+                        try:
+                            async for message in thread.history(limit=100, oldest_first=True):
+                                if not message.author.bot:  # Skip bot messages
+                                    message_data = {
+                                        "discord_message_id": str(message.id),
+                                        "discord_user_id": str(message.author.id),
+                                        "discord_user_name": message.author.name,
+                                        "message": message.content,
+                                        "created_at": message.created_at or datetime.now(timezone.utc)
+                                    }
+                                    messages_list.append(message_data)
+                        except Exception as e:
+                            logger.error(f"Error fetching messages for thread {thread_id}: {e}")
+                            continue
+                        
+                        if not messages_list:
+                            logger.debug(f"No messages found in thread {thread_id}, skipping")
+                            continue
+                        
+                        # Create forum chat document
+                        forum_chat = {
+                            "user_id": user_id,
+                            "server_id": server_id,
+                            "thread_id": thread_id,
+                            "channel_id": forum_id,
+                            "channel_name": channel.name,
+                            "thread_name": thread.name,
+                            "messages": messages_list,
+                            "created_at": thread.created_at or datetime.now(timezone.utc),
+                            "updated_at": datetime.now(timezone.utc)
+                        }
+                        
+                        await db["forum_chats"].insert_one(forum_chat)
+                        logger.info(f"✨ Backfilled thread {thread_id} ({thread.name}) with {len(messages_list)} messages")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing thread {thread.id} in forum {forum_id}: {e}")
+                        continue
+                
+            except Exception as e:
+                logger.error(f"Error backfilling forum {forum_id}: {e}")
+                continue
+        
+        logger.info(f"Completed backfilling for {len(forum_ids)} forums")
+        
+    except Exception as e:
+        logger.error(f"Error in _backfill_new_forums: {e}", exc_info=True)
+
+
+async def _cleanup_deleted_forums(server_id: str, removed_forum_ids: list) -> None:
+    """
+    Clean up data for forums that were removed from selected_forums.
+    Deletes forum_chats and discord_context_chunks for the removed forums.
+    
+    Args:
+        server_id: The Discord server ID
+        removed_forum_ids: List of forum channel IDs that were removed
+    """
+    try:
+        db = DatabaseSession.get_db()
+        if db is None:
+            logger.error("Database connection is None in _cleanup_deleted_forums")
+            return
+        
+        # Delete forum_chats for removed forums
+        forum_chats_result = await db["forum_chats"].delete_many({
+            "server_id": server_id,
+            "channel_id": {"$in": removed_forum_ids}
+        })
+        
+        # Delete discord_context_chunks for removed forums
+        context_chunks_result = await db["discord_context_chunks"].delete_many({
+            "server_id": server_id,
+            "channel_id": {"$in": removed_forum_ids}
+        })
+        
+        logger.info(
+            f"🧹 Cleaned up {forum_chats_result.deleted_count} forum chats and "
+            f"{context_chunks_result.deleted_count} context chunks for {len(removed_forum_ids)} removed forums"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in _cleanup_deleted_forums: {e}", exc_info=True)
+
+
 async def update_selected_forums(user_id: str, server_id: str, selected_forums: list) -> bool:
     """
     Update the selected_forums list for a specific server.
+    Handles backfilling history for new forums and cleanup for removed forums.
     
     Args:
         user_id: The user ID who owns the server registration
@@ -219,8 +370,33 @@ async def update_selected_forums(user_id: str, server_id: str, selected_forums: 
         if db is None:
             logger.error("Database connection is None")
             return False
-            
-        # Update the selected_forums field for the server
+        
+        # Fetch current server document to get existing selected_forums
+        server_doc = await db["discord_servers"].find_one(
+            {"user_id": str(user_id), "server_id": str(server_id)}
+        )
+        
+        if not server_doc:
+            logger.warning(f"No server found for user_id={user_id}, server_id={server_id}")
+            return False
+        
+        # Get current selected forums (before update)
+        current_forums = server_doc.get("selected_forums", [])
+        current_forum_ids = {forum.get("forum_id") for forum in current_forums if forum.get("forum_id")}
+        
+        # Get new forum IDs from the request
+        new_forum_ids = {forum.get("forum_id") for forum in selected_forums if forum.get("forum_id")}
+        
+        # Identify additions and deletions
+        added_forum_ids = list(new_forum_ids - current_forum_ids)
+        removed_forum_ids = list(current_forum_ids - new_forum_ids)
+        
+        logger.info(
+            f"Forum selection changes for server {server_id}: "
+            f"Added={len(added_forum_ids)}, Removed={len(removed_forum_ids)}"
+        )
+        
+        # Update the selected_forums field in database
         result = await db["discord_servers"].update_one(
             {"user_id": str(user_id), "server_id": str(server_id)},
             {"$set": {
@@ -230,14 +406,24 @@ async def update_selected_forums(user_id: str, server_id: str, selected_forums: 
         )
         
         if result.matched_count == 0:
-            logger.warning(f"No server found for user_id={user_id}, server_id={server_id}")
+            logger.warning(f"Failed to update selected_forums for server {server_id}")
             return False
-            
+        
+        # Trigger backfilling for newly added forums
+        if added_forum_ids:
+            logger.info(f"Backfilling {len(added_forum_ids)} new forums")
+            await _backfill_new_forums(server_id, user_id, added_forum_ids)
+        
+        # Trigger cleanup for removed forums
+        if removed_forum_ids:
+            logger.info(f"Cleaning up {len(removed_forum_ids)} removed forums")
+            await _cleanup_deleted_forums(server_id, removed_forum_ids)
+        
         logger.info(f"Successfully updated selected_forums for server {server_id}")
         return True
         
     except Exception as e:
-        logger.error(f"Error updating selected forums: {e}")
+        logger.error(f"Error updating selected forums: {e}", exc_info=True)
         return False
 
 
