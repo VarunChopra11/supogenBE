@@ -8,7 +8,7 @@ from api.v1.routers.analytics import router as analytics_router
 from fastapi.middleware.cors import CORSMiddleware
 from api.v1.db.init_db import init_db, close_db
 from contextlib import asynccontextmanager
-from api.v1.services.discord_services.discord_bot import run_discord_bot_async
+from api.v1.services.discord_services.discord_bot import run_discord_bot_async, bot as discord_bot
 from api.v1.tasks import start_auto_resolve_task
 from dotenv import load_dotenv
 import asyncio
@@ -23,6 +23,13 @@ async def lifespan(app: FastAPI):
     # Start the auto-resolve background task
     await start_auto_resolve_task()
     yield
+    # Clean shutdown: close the Discord bot's HTTP session / gateway
+    # to prevent aiohttp "Unclosed connector" warnings.
+    try:
+        if not discord_bot.is_closed():
+            await discord_bot.close()
+    except Exception:
+        pass
     await close_db()
 
 app = FastAPI(lifespan=lifespan)

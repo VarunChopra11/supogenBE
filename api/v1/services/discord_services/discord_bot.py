@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 
 import asyncio
+import aiohttp
 from api.v1.utils.exceptions import (
     AuthenticationError,
     ServerAlreadyRegisteredError,
@@ -469,13 +470,108 @@ async def authenticate(interaction: discord.Interaction, token: str):
         await interaction.followup.send("❌ An unexpected error occurred. Please try again later.", ephemeral=True)
 
 
-async def run_discord_bot_async():
-    """Start the Discord bot within an existing asyncio event loop.
+async def run_discord_bot_async(
+    *,
+    base_delay: float = 5.0,
+    max_delay: float = 300.0,
+    max_retries: int | None = None,
+):
+    """Start the Discord bot with exponential backoff on transient failures.
 
     Using bot.start avoids creating a separate event loop/thread so that
     awaits inside command handlers (e.g., Motor/Mongo calls) run on the
     same loop as the rest of the app, preventing cross-loop Future errors.
+
+    Rapid restarts can trigger Cloudflare 429 / Error 1015 blocks.
+    This wrapper retries with exponential back-off + jitter so the service 
+    recovers automatically once the rate-limit window expires.
+
+    Args:
+        base_delay:  Initial delay (seconds) before the first retry.
+        max_delay:   Upper bound on the back-off delay.
+        max_retries: Stop retrying after this many attempts (``None`` = forever).
     """
+    import random
+
     if not TOKEN:
         raise RuntimeError("Missing DISCORD_BOT_TOKEN in .env")
-    await bot.start(TOKEN)
+
+    attempt = 0
+
+    while True:
+        try:
+            logging.info("🔌 Connecting to Discord gateway (attempt %d)…", attempt + 1)
+            await bot.start(TOKEN)
+            # bot.start() only returns when the bot is explicitly closed,
+            logging.info("🔌 Discord bot session ended gracefully.")
+            return
+
+        except discord.errors.LoginFailure:
+            # Bad / revoked token — retrying won't help.
+            logging.critical("🔑 Invalid or revoked DISCORD_BOT_TOKEN — aborting.")
+            raise
+
+        except discord.errors.HTTPException as exc:
+            if exc.status == 429:
+                retry_after = getattr(exc, "retry_after", None) or base_delay
+                delay = max(retry_after, base_delay) + random.uniform(0, 2)
+                logging.warning(
+                    "⏳ 429 rate-limited (Retry-After=%.1fs). "
+                    "Sleeping %.1fs before retry…",
+                    retry_after,
+                    delay,
+                )
+            elif 500 <= exc.status < 600:
+                # Discord-side server error — worth retrying.
+                delay = min(base_delay * (2 ** attempt), max_delay) + random.uniform(0, 2)
+                logging.warning(
+                    "🔥 Discord returned %d. Sleeping %.1fs before retry…",
+                    exc.status,
+                    delay,
+                )
+            else:
+                # 4xx other than 429 (e.g. 401, 403) — likely not transient.
+                logging.error(
+                    "❌ Discord HTTP %d: %s — not retrying.", exc.status, exc.text
+                )
+                raise
+
+        except (OSError, aiohttp.ClientError) as exc:
+            # Network-level failures (DNS, connection reset, etc.)
+            delay = min(base_delay * (2 ** attempt), max_delay) + random.uniform(0, 2)
+            logging.warning(
+                "🌐 Network error (%s). Sleeping %.1fs before retry…",
+                exc,
+                delay,
+            )
+
+        except asyncio.CancelledError:
+            logging.info("🛑 Discord bot task cancelled.")
+            raise
+
+        except Exception as exc:
+            # Catch-all for anything unexpected — still retry, but log loudly.
+            delay = min(base_delay * (2 ** attempt), max_delay) + random.uniform(0, 2)
+            logging.exception(
+                "💥 Unexpected error in Discord bot. Sleeping %.1fs before retry…",
+                delay,
+            )
+
+        # --- Cleanup & retry bookkeeping ---
+        attempt += 1
+        if max_retries is not None and attempt >= max_retries:
+            logging.error(
+                "🚫 Exhausted %d retry attempts — giving up.", max_retries
+            )
+            raise RuntimeError(
+                f"Discord bot failed to connect after {max_retries} attempts"
+            )
+
+        # Close the bot's internal HTTP session / gateway socket so aiohttp
+        try:
+            await bot.close()
+        except Exception:
+            pass
+
+        logging.info("💤 Waiting %.1fs before reconnect attempt %d…", delay, attempt + 1)
+        await asyncio.sleep(delay)
