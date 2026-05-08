@@ -567,11 +567,5 @@ async def run_discord_bot_async(
                 f"Discord bot failed to connect after {max_retries} attempts"
             )
 
-        # Close the bot's internal HTTP session / gateway socket so aiohttp
-        try:
-            await bot.close()
-        except Exception:
-            pass
-
         logging.info("💤 Waiting %.1fs before reconnect attempt %d…", delay, attempt + 1)
         await asyncio.sleep(delay)
