@@ -37,6 +37,7 @@ app = FastAPI(lifespan=lifespan)
 
 origins = [
     "https://app.supogen.com",
+    "https://supogen-fe.vercel.app",
     "http://localhost:3000",
 ]
 
