@@ -36,7 +36,8 @@ app = FastAPI(lifespan=lifespan)
 
 
 origins = [
-    "https://app.supogen.com",
+    # "https://app.supogen.com",
+    "https://app.supogen.varunchopra.tech",
     "https://supogen-fe.vercel.app",
     "http://localhost:3000",
 ]
