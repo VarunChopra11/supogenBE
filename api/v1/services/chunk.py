@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 import logging
 import asyncio
 from datetime import datetime, timezone
+import tiktoken
 from .embed import generate_text_embedding, insert_embeddings
 from api.v1.config import ai_config
 
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 MAX_TOKENS = 1024
 OVERLAP_TOKENS = 200
+
+# text-embedding-3-small uses the cl100k_base tokenizer.
+TOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
 
 
 class ChunkService:
@@ -182,43 +186,46 @@ class ChunkService:
         return await asyncio.to_thread(_parse_sync, md_text)
 
     def count_tokens(self, text: str) -> int:
-        """Simple token counting by whitespace splitting"""
-        return len(text.split())
+        """Count tokens using the tokenizer used by text-embedding-3-small."""
+        return len(TOKEN_ENCODING.encode(text))
 
     async def chunk_text(self, text: str, max_tokens: int = MAX_TOKENS, overlap_tokens: int = OVERLAP_TOKENS) -> List[str]:
         """
-        Split text into overlapping token chunks.
-        
+        Split text into overlapping chunks that never exceed max_tokens.
+
         Runs chunking in a thread pool to avoid blocking the event loop for large texts.
         """
         def _chunk_sync(text_content: str) -> List[str]:
-            """Synchronous chunking logic."""
+            """Synchronous token-based chunking logic."""
             try:
-                # Split by sentences (simple approach)
-                sentences = re.split(r"(?<=[\.\?\!])\s+", text_content)
-                chunks, current, cur_tokens = [], "", 0
+                if max_tokens <= 0:
+                    raise ValueError("max_tokens must be greater than zero")
+                if overlap_tokens < 0 or overlap_tokens >= max_tokens:
+                    raise ValueError("overlap_tokens must be non-negative and smaller than max_tokens")
 
-                for s in sentences:
-                    s_tokens = self.count_tokens(s)
-                    if cur_tokens + s_tokens > max_tokens:
-                        if current:
-                            chunks.append(current.strip())
-                        # Add overlap
-                        overlap = current.split()[-overlap_tokens:]
-                        current = " ".join(overlap) + " " + s
-                        cur_tokens = self.count_tokens(current)
-                    else:
-                        current += " " + s
-                        cur_tokens += s_tokens
+                token_ids = TOKEN_ENCODING.encode(text_content)
+                if not token_ids:
+                    return []
 
-                if current.strip():
-                    chunks.append(current.strip())
+                chunks = []
+                start = 0
+
+                while start < len(token_ids):
+                    end = min(start + max_tokens, len(token_ids))
+                    chunk = TOKEN_ENCODING.decode(token_ids[start:end])
+                    if chunk.strip():
+                        chunks.append(chunk)
+
+                    if end == len(token_ids):
+                        break
+
+                    start = end - overlap_tokens
 
                 return chunks
             except Exception as e:
                 logger.error(f"Error chunking text: {str(e)}")
                 raise ValueError(f"Failed to chunk text: {str(e)}")
-        
+
         # Run CPU-intensive chunking in thread pool for large texts
         return await asyncio.to_thread(_chunk_sync, text)
 
