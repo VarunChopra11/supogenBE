@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any, AsyncGenerator
-from openai import AsyncAzureOpenAI, AsyncOpenAI, APIError, APIConnectionError, RateLimitError
+from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
 from dotenv import load_dotenv
 
 from api.v1.db.session import DatabaseSession
@@ -10,10 +10,9 @@ load_dotenv(override=True)
 try:
     # Prefer Azure OpenAI if endpoint provided, else default to standard OpenAI
     if ai_config.AZURE_OPENAI_ENDPOINT:
-        async_client = AsyncAzureOpenAI(
+        async_client = AsyncOpenAI(
             api_key=ai_config.AZURE_OPENAI_API_KEY,
-            azure_endpoint=f"{ai_config.AZURE_OPENAI_ENDPOINT}",
-            api_version="2024-08-01-preview",
+            base_url=f"{ai_config.AZURE_OPENAI_ENDPOINT.rstrip('/')}/openai/v1/",
         )
     else:
         async_client = AsyncOpenAI(api_key=ai_config.OPENAI_API_KEY)
@@ -28,7 +27,7 @@ async def generate_text_embedding(text: str) -> Optional[List[float]]:
 
     try:
         response = await async_client.embeddings.create(
-            model="text-embedding-3-small",
+            model=ai_config.EMBEDDING_DEPLOYMENT,
             input=text.strip()
         )
         return response.data[0].embedding
@@ -45,7 +44,7 @@ async def stream_openai_chat_completion_with_history(
     messages: List[Dict[str, str]],
 ) -> AsyncGenerator[str, None]:
     """
-    GPT-4o-mini chat completion with full message history.
+    GPT-5-nano chat completion with full message history.
     Provides streaming response.
     """
     if not messages or not isinstance(messages, list):
@@ -53,9 +52,8 @@ async def stream_openai_chat_completion_with_history(
 
     try:
         params = {
-            "model": "gpt-4o-mini",
+            "model": ai_config.CHAT_DEPLOYMENT,
             "messages": messages,
-            "temperature": 0.2,
             "stream": True
         }
 
@@ -83,16 +81,15 @@ async def get_openai_chat_completion_with_history(
     response_format: dict | None = None
 ) -> str:
     """
-    GPT-4o-mini chat completion with full message history (non-streaming).
+    GPT-5-nano chat completion with full message history (non-streaming).
     """
     if not messages or not isinstance(messages, list):
         raise ValueError("Messages must be a non-empty list")
 
     try:
         params = {
-            "model": "gpt-4o-mini",
+            "model": ai_config.CHAT_DEPLOYMENT,
             "messages": messages,
-            "temperature": 0.2,
             "stream": False
         }
         if response_format is not None:

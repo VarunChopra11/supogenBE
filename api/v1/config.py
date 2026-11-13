@@ -59,7 +59,17 @@ class AIConfig:
     def AZURE_OPENAI_ENDPOINT(self):
         """Azure OpenAI endpoint base URL, e.g. https://your-resource.openai.azure.com."""
         return os.getenv("AZURE_OPENAI_ENDPOINT")
-    
+
+    @property
+    def CHAT_DEPLOYMENT(self):
+        """Azure chat model deployment name."""
+        return os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-5-nano")
+
+    @property
+    def EMBEDDING_DEPLOYMENT(self):
+        """Azure embedding model deployment name."""
+        return os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small")
+
     @property
     def FIRECRAWL_API_KEY(self):
         """Firecrawl API key for web scraping and URL-to-markdown conversion."""
