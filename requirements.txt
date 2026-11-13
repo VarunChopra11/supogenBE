@@ -13,3 +13,4 @@ discord
 openai
 markdown-it-py
 firecrawl-py
+tiktoken
